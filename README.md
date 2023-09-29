@@ -2,6 +2,7 @@
 
 [![ProbeLab](https://img.shields.io/badge/made%20by-ProbeLab-blue.svg?style=flat-square)](https://probelab.io)
 [![Libp2p](https://img.shields.io/badge/project-libp2p-yellow.svg?style=flat-square)](https://libp2p.io)
+[![Build status](https://img.shields.io/github/actions/workflow/status/plprobelab/zikade/go-test.yml?branch=main)](https://github.com/plprobelab/zikade/actions)
 [![GoDoc](https://pkg.go.dev/badge/github.com/plprobelab/zikade)](https://pkg.go.dev/github.com/plprobelab/zikade)
 [![Discourse posts](https://img.shields.io/discourse/https/discuss.libp2p.io/posts.svg)](https://discuss.libp2p.io)
 
