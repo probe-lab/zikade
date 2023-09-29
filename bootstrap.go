@@ -1,4 +1,4 @@
-package dht
+package zikade
 
 import (
 	"github.com/libp2p/go-libp2p/core/peer"
