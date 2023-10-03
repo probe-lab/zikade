@@ -298,6 +298,7 @@ func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (Behaviour
 		cmd = &query.EventPoolNodeResponse[kadt.Key, kadt.PeerID]{
 			NodeID:      ev.To,
 			QueryID:     ev.QueryID,
+			Target:      ev.Target,
 			CloserNodes: ev.CloserNodes,
 		}
 	case *EventGetCloserNodesFailure:
