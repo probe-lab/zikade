@@ -36,7 +36,7 @@ func (t *Topology) SetClock(clk clock.Clock) {
 
 // AddServer adds a DHT configured as a server to the topology.
 // If cfg is nil the default DHT config is used with Mode set to ModeOptServer
-func (t *Topology) AddServer(cfg *Config) *DHT {
+func (t *Topology) AddServer(cfg *Config) *RoutingDHT {
 	t.tb.Helper()
 
 	listenAddr := libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0")
@@ -71,12 +71,12 @@ func (t *Topology) AddServer(cfg *Config) *DHT {
 	t.dhts[did] = d
 	t.rns[did] = rn
 
-	return d
+	return NewRouting(d)
 }
 
 // AddServer adds a DHT configured as a client to the topology.
 // If cfg is nil the default DHT config is used with Mode set to ModeOptClient
-func (t *Topology) AddClient(cfg *Config) *DHT {
+func (t *Topology) AddClient(cfg *Config) *RoutingDHT {
 	t.tb.Helper()
 
 	h, err := libp2p.New(libp2p.NoListenAddrs)
