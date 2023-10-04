@@ -19,7 +19,7 @@ type ctxKey struct{}
 
 const (
 	MeterName  = "github.com/plprobelab/zikade"
-	TracerName = "go-libp2p-kad-dht"
+	TracerName = "github.com/plprobelab/zikade"
 )
 
 // NoopTracer returns a tracer that does not emit traces.
