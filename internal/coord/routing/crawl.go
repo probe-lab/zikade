@@ -1,4 +1,4 @@
-package query
+package routing
 
 import (
 	"context"
@@ -42,15 +42,6 @@ func DefaultCrawlConfig() *CrawlConfig {
 	}
 }
 
-type crawlJob[K kad.Key[K], N kad.NodeID[K]] struct {
-	node   N
-	target K
-}
-
-func (c *crawlJob[K, N]) mapKey() string {
-	return c.node.String() + key.HexString(c.target)
-}
-
 type Crawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	self N
 	id   coordt.QueryID
@@ -72,10 +63,6 @@ func NewCrawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt
 		cfg = DefaultCrawlConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
-	}
-
-	if len(seed) == 0 {
-		return nil, fmt.Errorf("empty seed")
 	}
 
 	c := &Crawl[K, N, M]{
@@ -113,6 +100,10 @@ func NewCrawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt
 		}
 	}
 
+	if len(seed) == 0 {
+		return nil, fmt.Errorf("empty seed")
+	}
+
 	return c, nil
 }
 
@@ -148,18 +139,18 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 					continue
 				}
 
-				job := crawlJob[K, N]{
+				newJob := crawlJob[K, N]{
 					node:   node,
 					target: target.Key(),
 				}
 
-				mapKey := job.mapKey()
+				newMapKey := newJob.mapKey()
 
-				if _, found := c.cpls[mapKey]; found {
+				if _, found := c.cpls[newMapKey]; found {
 					continue
 				}
 
-				c.cpls[mapKey] = i
+				c.cpls[newMapKey] = i
 				c.todo = append(c.todo, job)
 			}
 		}
@@ -214,6 +205,15 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 	}
 
 	return &StateCrawlFinished{}
+}
+
+type crawlJob[K kad.Key[K], N kad.NodeID[K]] struct {
+	node   N
+	target K
+}
+
+func (c *crawlJob[K, N]) mapKey() string {
+	return c.node.String() + key.HexString(c.target)
 }
 
 type CrawlState interface {
