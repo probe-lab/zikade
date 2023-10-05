@@ -165,28 +165,41 @@ func (suite *DiversityFilterTestSuite) TestRtPeerIPGroupFilter() {
 // TestRTPeerDiversityFilter tests the TrieRTPeerDiversityFilter implementation
 func TestRTPeerDiversityFilter(t *testing.T) {
 	ctx := context.Background()
-	h, err := libp2p.New()
+
+	listenOpt := libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0")
+
+	h, err := libp2p.New(listenOpt)
 	require.NoError(t, err)
 
 	// create 2 remote peers
-	h1, err := libp2p.New()
+	h1, err := libp2p.New(listenOpt)
 	require.NoError(t, err)
-	h2, err := libp2p.New()
+
+	h2, err := libp2p.New(listenOpt)
+	require.NoError(t, err)
+
+	// clean up after ourselves
+	t.Cleanup(func() {
+		require.NoError(t, h.Close())
+		require.NoError(t, h1.Close())
+		require.NoError(t, h2.Close())
+	})
+
+	// create peer filter and routing table
+	peerFilter, err := NewRTPeerDiversityFilter(h, 1, 1)
+	require.NoError(t, err)
+
+	rtcfg := &triert.Config[kadt.Key, kadt.PeerID]{
+		NodeFilter: peerFilter,
+	}
+	rt, err := triert.New[kadt.Key, kadt.PeerID](kadt.PeerID(h.ID()), rtcfg)
 	require.NoError(t, err)
 
 	// connect h to h1 and h2
 	err = h.Connect(ctx, peer.AddrInfo{ID: h1.ID(), Addrs: h1.Addrs()})
 	require.NoError(t, err)
-	err = h.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
-	require.NoError(t, err)
 
-	// create peer filter and routing table
-	peerFilter, err := NewRTPeerDiversityFilter(h, 1, 1)
-	require.NoError(t, err)
-	rtcfg := &triert.Config[kadt.Key, kadt.PeerID]{
-		NodeFilter: peerFilter,
-	}
-	rt, err := triert.New[kadt.Key, kadt.PeerID](kadt.PeerID(h.ID()), rtcfg)
+	err = h.Connect(ctx, peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
 	require.NoError(t, err)
 
 	// try to add h1 to the routing table. succeeds because it is the first peer

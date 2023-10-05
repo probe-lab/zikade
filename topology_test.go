@@ -8,6 +8,7 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/plprobelab/zikade/internal/coord"
 	"github.com/plprobelab/zikade/kadt"
 	"github.com/stretchr/testify/require"
@@ -41,7 +42,7 @@ func (t *Topology) AddServer(cfg *Config) *DHT {
 
 	listenAddr := libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0")
 
-	h, err := libp2p.New(listenAddr)
+	h, err := libp2p.New(append(t.hostOpts(), listenAddr)...)
 	require.NoError(t.tb, err)
 
 	t.tb.Cleanup(func() {
@@ -79,7 +80,7 @@ func (t *Topology) AddServer(cfg *Config) *DHT {
 func (t *Topology) AddClient(cfg *Config) *DHT {
 	t.tb.Helper()
 
-	h, err := libp2p.New(libp2p.NoListenAddrs)
+	h, err := libp2p.New(append(t.hostOpts(), libp2p.NoListenAddrs)...)
 	require.NoError(t.tb, err)
 
 	t.tb.Cleanup(func() {
@@ -110,6 +111,22 @@ func (t *Topology) AddClient(cfg *Config) *DHT {
 	t.rns[did] = rn
 
 	return d
+}
+
+// hostOpts returns libp2p host options common to DHT clients and servers.
+func (t *Topology) hostOpts() []libp2p.Option {
+	// If two peers simultaneously connect, they could end up in a state where
+	// one peer is waiting on the connection for the other one, although there
+	// already exists a valid connection. The libp2p dial loop doesn't recognize
+	// the new connection immediately, but only after the local dial has timed
+	// out. By default, the timeout is set to 5s which results in failing tests
+	// as the tests time out. By setting the timeout to a much lower value, we
+	// work around the timeout issue. Try to remove the following swarm options
+	// after https://github.com/libp2p/go-libp2p/issues/2589 was resolved.
+	localDialTimeout := 100 * time.Millisecond
+	swarmOpts := libp2p.SwarmOpts(swarm.WithDialTimeoutLocal(localDialTimeout))
+
+	return []libp2p.Option{swarmOpts}
 }
 
 func (t *Topology) makeid(d *DHT) string {
