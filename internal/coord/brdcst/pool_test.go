@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/internal/coord/internal/tiny"
+	"github.com/plprobelab/zikade/internal/tiny"
 )
 
 // Assert that Pool implements the common state machine interface

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/coord/internal/tiny"
+	"github.com/plprobelab/zikade/internal/tiny"
 )
 
 func TestExploreConfigValidate(t *testing.T) {
