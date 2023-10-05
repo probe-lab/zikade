@@ -149,7 +149,6 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 	in.counterChecksSent, err = cfg.Meter.Int64Counter(
 		"include_checks_sent",
 		metric.WithDescription("Total number of connectivity checks sent by the include state machine"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create include_checks_sent counter: %w", err)
@@ -158,7 +157,6 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 	in.counterChecksPassed, err = cfg.Meter.Int64Counter(
 		"include_checks_passed",
 		metric.WithDescription("Total number of connectivity checks sent by the include state machine that were successful"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create include_checks_passed counter: %w", err)
@@ -167,7 +165,6 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 	in.counterChecksFailed, err = cfg.Meter.Int64Counter(
 		"include_checks_failed",
 		metric.WithDescription("Total number of connectivity checks sent by the include state machine that failed"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create include_checks_failed counter: %w", err)
@@ -176,7 +173,6 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 	in.counterCandidatesDroppedCapacity, err = cfg.Meter.Int64Counter(
 		"include_candidates_dropped_capacity",
 		metric.WithDescription("Total number of nodes that were not added to the candidate queue because it was already at maximum capacity"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create include_candidates_dropped_capacity counter: %w", err)
@@ -185,7 +181,6 @@ func NewInclude[K kad.Key[K], N kad.NodeID[K]](rt kad.RoutingTable[K, N], cfg *I
 	in.gaugeCandidateCount, err = cfg.Meter.Int64ObservableGauge(
 		"include_candidate_count",
 		metric.WithDescription("Total number of nodes in the include state machine's candidate queue"),
-		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
 			o.Observe(in.candidateCount.Load())
 			return nil

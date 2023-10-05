@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -31,8 +32,10 @@ type router struct {
 	// [protocol]: https://docs.libp2p.io/concepts/fundamentals/protocols/
 	protocolID protocol.ID
 
-	// an open telemetry tacer instance
-	tracer trace.Tracer
+	// tele holds a reference to a telemetry struct
+	tele *Telemetry
+
+	clk clock.Clock
 }
 
 var _ coordt.Router[kadt.Key, kadt.PeerID, *pb.Message] = (*router)(nil)
@@ -43,7 +46,7 @@ func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Messag
 		trace.WithAttributes(tele.AttrPeerID(to.String())),
 		trace.WithAttributes(tele.AttrKey(base64.RawStdEncoding.EncodeToString(req.GetKey()))),
 	}
-	ctx, span := r.tracer.Start(ctx, "router.SendMessage", spanOpts...)
+	ctx, span := r.tele.Tracer.Start(ctx, "router.SendMessage", spanOpts...)
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
@@ -70,27 +73,42 @@ func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Messag
 	w := pbio.NewDelimitedWriter(s)
 	reader := msgio.NewVarintReaderSize(s, network.MessageSizeMax)
 
-	err = w.WriteMsg(req)
-	if err != nil {
-		return nil, fmt.Errorf("write message: %w", err)
-	}
-
 	if !req.ExpectResponse() {
+		err = w.WriteMsg(req)
+		r.tele.SentMessages.Add(ctx, 1)
+		if err != nil {
+			r.tele.SentMessageErrors.Add(ctx, 1)
+			return nil, fmt.Errorf("write message: %w", err)
+		}
+		r.tele.SentBytes.Record(ctx, int64(req.Size()))
 		return nil, nil
 	}
 
+	start := r.clk.Now()
+
+	err = w.WriteMsg(req)
+	r.tele.SentRequests.Add(ctx, 1)
+	if err != nil {
+		r.tele.SentRequestErrors.Add(ctx, 1)
+		return nil, fmt.Errorf("write message: %w", err)
+	}
+	r.tele.SentBytes.Record(ctx, int64(req.Size()))
+
 	span.End()
-	ctx, span = r.tracer.Start(ctx, "router.ReadMessage", spanOpts...)
+	ctx, span = r.tele.Tracer.Start(ctx, "router.ReadMessage", spanOpts...)
 
 	data, err := reader.ReadMsg()
 	if err != nil {
+		r.tele.SentRequestErrors.Add(ctx, 1)
 		return nil, fmt.Errorf("read message: %w", err)
 	}
 
 	protoResp := pb.Message{}
 	if err = proto.Unmarshal(data, &protoResp); err != nil {
+		r.tele.SentRequestErrors.Add(ctx, 1)
 		return nil, err
 	}
+	r.tele.OutboundRequestLatency.Record(ctx, float64(r.clk.Since(start))/float64(time.Millisecond))
 
 	for _, info := range protoResp.CloserPeersAddrInfos() {
 		_ = r.addToPeerStore(ctx, info, time.Hour) // TODO: replace hard coded time.Hour with config

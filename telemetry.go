@@ -24,9 +24,9 @@ type Telemetry struct {
 	ReceivedBytes          metric.Int64Histogram
 	InboundRequestLatency  metric.Float64Histogram
 	OutboundRequestLatency metric.Float64Histogram
-	SentMessages           metric.Int64Counter
+	SentMessages           metric.Int64Counter // number of messages sent that did not expect a response
 	SentMessageErrors      metric.Int64Counter
-	SentRequests           metric.Int64Counter
+	SentRequests           metric.Int64Counter // number of messages sent that expected a response
 	SentRequestErrors      metric.Int64Counter
 	SentBytes              metric.Int64Histogram
 	LRUCache               metric.Int64Counter
@@ -63,12 +63,12 @@ func NewTelemetry(meterProvider metric.MeterProvider, tracerProvider trace.Trace
 
 	// Initalize metrics for the DHT
 
-	t.ReceivedMessages, err = meter.Int64Counter("received_messages", metric.WithDescription("Total number of messages received per RPC"), metric.WithUnit("1"))
+	t.ReceivedMessages, err = meter.Int64Counter("received_messages", metric.WithDescription("Total number of messages received per RPC"))
 	if err != nil {
 		return nil, fmt.Errorf("received_messages counter: %w", err)
 	}
 
-	t.ReceivedMessageErrors, err = meter.Int64Counter("received_message_errors", metric.WithDescription("Total number of errors for messages received per RPC"), metric.WithUnit("1"))
+	t.ReceivedMessageErrors, err = meter.Int64Counter("received_message_errors", metric.WithDescription("Total number of errors for messages received per RPC"))
 	if err != nil {
 		return nil, fmt.Errorf("received_message_errors counter: %w", err)
 	}
@@ -88,22 +88,22 @@ func NewTelemetry(meterProvider metric.MeterProvider, tracerProvider trace.Trace
 		return nil, fmt.Errorf("outbound_request_latency histogram: %w", err)
 	}
 
-	t.SentMessages, err = meter.Int64Counter("sent_messages", metric.WithDescription("Total number of messages sent per RPC"), metric.WithUnit("1"))
+	t.SentMessages, err = meter.Int64Counter("sent_messages", metric.WithDescription("Total number of messages sent per RPC"))
 	if err != nil {
 		return nil, fmt.Errorf("sent_messages counter: %w", err)
 	}
 
-	t.SentMessageErrors, err = meter.Int64Counter("sent_message_errors", metric.WithDescription("Total number of errors for messages sent per RPC"), metric.WithUnit("1"))
+	t.SentMessageErrors, err = meter.Int64Counter("sent_message_errors", metric.WithDescription("Total number of errors for messages sent per RPC"))
 	if err != nil {
 		return nil, fmt.Errorf("sent_message_errors counter: %w", err)
 	}
 
-	t.SentRequests, err = meter.Int64Counter("sent_requests", metric.WithDescription("Total number of requests sent per RPC"), metric.WithUnit("1"))
+	t.SentRequests, err = meter.Int64Counter("sent_requests", metric.WithDescription("Total number of requests sent per RPC"))
 	if err != nil {
 		return nil, fmt.Errorf("sent_requests counter: %w", err)
 	}
 
-	t.SentRequestErrors, err = meter.Int64Counter("sent_request_errors", metric.WithDescription("Total number of errors for requests sent per RPC"), metric.WithUnit("1"))
+	t.SentRequestErrors, err = meter.Int64Counter("sent_request_errors", metric.WithDescription("Total number of errors for requests sent per RPC"))
 	if err != nil {
 		return nil, fmt.Errorf("sent_request_errors counter: %w", err)
 	}
@@ -113,12 +113,12 @@ func NewTelemetry(meterProvider metric.MeterProvider, tracerProvider trace.Trace
 		return nil, fmt.Errorf("sent_bytes histogram: %w", err)
 	}
 
-	t.LRUCache, err = meter.Int64Counter("lru_cache", metric.WithDescription("Cache hit or miss counter"), metric.WithUnit("1"))
+	t.LRUCache, err = meter.Int64Counter("lru_cache", metric.WithDescription("Cache hit or miss counter"))
 	if err != nil {
 		return nil, fmt.Errorf("lru_cache counter: %w", err)
 	}
 
-	t.NetworkSize, err = meter.Int64Counter("network_size", metric.WithDescription("Network size estimation"), metric.WithUnit("1"))
+	t.NetworkSize, err = meter.Int64Counter("network_size", metric.WithDescription("Network size estimation"))
 	if err != nil {
 		return nil, fmt.Errorf("network_size counter: %w", err)
 	}
