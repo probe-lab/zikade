@@ -14,6 +14,7 @@ It uses a state machine-oriented execution model, with a single worker coordinat
 
 ## Table of Contents
 
+- [Status](#status)
 - [Background](#background)
   - [Motivation](#motivation)
   - [Compatibility](#compatibility)
@@ -21,6 +22,10 @@ It uses a state machine-oriented execution model, with a single worker coordinat
 - [Maintainers](#maintainers)
 - [Contributing](#contributing)
 - [License](#license)
+
+## Status
+
+This project is under active development and has not reached feature completeness. You may experience unexpected behaviour in its current state. We've not yet made optimisation a priority, so some aspects of the software may run slower or consume more resources than expected. Community input and contributions are welcomed as we continue to iterate and improve.
 
 ## Background
 
