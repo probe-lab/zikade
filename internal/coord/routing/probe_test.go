@@ -11,7 +11,7 @@ import (
 	"github.com/plprobelab/go-libdht/kad/triert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/coord/internal/tiny"
+	"github.com/plprobelab/zikade/internal/tiny"
 )
 
 var _ heap.Interface = (*nodeValuePendingList[tiny.Key, tiny.Node])(nil)

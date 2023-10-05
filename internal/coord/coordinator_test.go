@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/internal/coord/internal/nettest"
 	"github.com/plprobelab/zikade/internal/kadtest"
+	"github.com/plprobelab/zikade/internal/nettest"
 	"github.com/plprobelab/zikade/kadt"
 	"github.com/plprobelab/zikade/pb"
 )

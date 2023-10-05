@@ -9,7 +9,7 @@ import (
 	"github.com/plprobelab/go-libdht/kad/triert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/coord/internal/tiny"
+	"github.com/plprobelab/zikade/internal/tiny"
 )
 
 func TestIncludeConfigValidate(t *testing.T) {
