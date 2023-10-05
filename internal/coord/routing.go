@@ -299,8 +299,11 @@ type RoutingBehaviour struct {
 	// probe is the node probing state machine, responsible for periodically checking connectivity of nodes in the routing table
 	probe coordt.StateMachine[routing.ProbeEvent, routing.ProbeState]
 
-	// explore is the routing table explore state machine, responsible for increasing the occupanct of the routing table
+	// explore is the routing table explore state machine, responsible for increasing the occupant of the routing table
 	explore coordt.StateMachine[routing.ExploreEvent, routing.ExploreState]
+
+	// crawl is the state machine that can crawl the network from a set of seed nodes
+	crawl coordt.StateMachine[routing.ExploreEvent, routing.ExploreState]
 
 	pendingMu sync.Mutex
 	pending   []BehaviourEvent
@@ -370,6 +373,8 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	if err != nil {
 		return nil, fmt.Errorf("explore: %w", err)
 	}
+
+	// crawl, err := routing.NewCrawl(self)
 
 	return ComposeRoutingBehaviour(self, bootstrap, include, probe, explore, cfg)
 }

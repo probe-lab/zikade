@@ -57,14 +57,15 @@ func DefaultCrawlConfig() *CrawlConfig {
 	}
 }
 
-type Crawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
-	self N
-	id   coordt.QueryID
-
-	// cfg is a copy of the optional configuration supplied to the query
+type Crawl[K kad.Key[K], N kad.NodeID[K]] struct {
+	self  N
 	cfg   CrawlConfig
 	cplFn coordt.NodeIDForCplFunc[K, N]
+	info  *crawlInformation[K, N] // only set of crawl is in progress
+}
 
+type crawlInformation[K kad.Key[K], N kad.NodeID[K]] struct {
+	queryID coordt.QueryID
 	todo    []crawlJob[K, N]
 	cpls    map[string]int
 	waiting map[string]N
@@ -73,56 +74,24 @@ type Crawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	errors  map[string]error
 }
 
-func NewCrawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt.QueryID, cplFn coordt.NodeIDForCplFunc[K, N], seed []N, cfg *CrawlConfig) (*Crawl[K, N, M], error) {
+func NewCrawl[K kad.Key[K], N kad.NodeID[K]](self N, cplFn coordt.NodeIDForCplFunc[K, N], cfg *CrawlConfig) (*Crawl[K, N], error) {
 	if cfg == nil {
 		cfg = DefaultCrawlConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
-	c := &Crawl[K, N, M]{
-		self:    self,
-		id:      id,
-		cfg:     *cfg,
-		cplFn:   cplFn,
-		todo:    make([]crawlJob[K, N], 0, len(seed)*cfg.MaxCPL),
-		cpls:    map[string]int{},
-		waiting: map[string]N{},
-		success: map[string]N{},
-		failed:  map[string]N{},
-		errors:  map[string]error{},
-	}
-
-	for _, node := range seed {
-		// exclude self from closest nodes
-		if key.Equal(node.Key(), self.Key()) {
-			continue
-		}
-
-		for i := 0; i < c.cfg.MaxCPL; i++ {
-			target, err := cplFn(node.Key(), i)
-			if err != nil {
-				return nil, fmt.Errorf("generate cpl: %w", err)
-			}
-
-			job := crawlJob[K, N]{
-				node:   node,
-				target: target.Key(),
-			}
-
-			c.cpls[job.mapKey()] = i
-			c.todo = append(c.todo, job)
-		}
-	}
-
-	if len(seed) == 0 {
-		return nil, fmt.Errorf("empty seed")
+	c := &Crawl[K, N]{
+		self:  self,
+		cfg:   *cfg,
+		cplFn: cplFn,
+		info:  nil,
 	}
 
 	return c, nil
 }
 
-func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlState) {
+func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlState) {
 	_, span := c.cfg.Tracer.Start(ctx, "Crawl.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	c.setMapSizes(span, "before")
 	defer func() {
@@ -132,10 +101,58 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 	}()
 
 	switch tev := ev.(type) {
-	case *EventCrawlCancel:
-		// TODO: ...
+	case *EventCrawlStart[K, N]:
+		if c.info != nil {
+			break // query in progress, pretend it was a poll
+		}
+
+		span.SetAttributes(attribute.Int("seed", len(tev.Seed)))
+
+		ci := &crawlInformation[K, N]{
+			queryID: tev.QueryID,
+			todo:    []crawlJob[K, N]{},
+			cpls:    map[string]int{},
+			waiting: map[string]N{},
+			success: map[string]N{},
+			failed:  map[string]N{},
+			errors:  map[string]error{},
+		}
+
+		for _, node := range tev.Seed {
+			// exclude self from closest nodes
+			if key.Equal(node.Key(), c.self.Key()) {
+				continue
+			}
+
+			for j := 0; j < c.cfg.MaxCPL; j++ {
+				target, err := c.cplFn(node.Key(), j)
+				if err != nil {
+					// return nil, fmt.Errorf("generate cpl: %w", err)
+					// TODO: log
+					continue
+				}
+
+				job := crawlJob[K, N]{
+					node:   node,
+					target: target.Key(),
+				}
+
+				ci.cpls[job.mapKey()] = j
+				ci.todo = append(ci.todo, job)
+			}
+		}
+
+		c.info = ci
+
 	case *EventCrawlNodeResponse[K, N]:
 		span.SetAttributes(attribute.Int("closer_nodes", len(tev.CloserNodes)))
+
+		if c.info == nil {
+			return &StateCrawlIdle{}
+		} else if c.info.queryID != tev.QueryID {
+			// if we don't know this query, pretend it was a poll by breaking
+			break
+		}
 
 		job := crawlJob[K, N]{
 			node:   tev.NodeID,
@@ -143,12 +160,12 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 		}
 
 		mapKey := job.mapKey()
-		if _, found := c.waiting[mapKey]; !found {
+		if _, found := c.info.waiting[mapKey]; !found {
 			break
 		}
 
-		delete(c.waiting, mapKey)
-		c.success[mapKey] = tev.NodeID
+		delete(c.info.waiting, mapKey)
+		c.info.success[mapKey] = tev.NodeID
 
 		for _, node := range tev.CloserNodes {
 			for i := 0; i < c.cfg.MaxCPL; i++ {
@@ -164,16 +181,23 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 				}
 
 				newMapKey := newJob.mapKey()
-				if _, found := c.cpls[newMapKey]; found {
+				if _, found := c.info.cpls[newMapKey]; found {
 					continue
 				}
 
-				c.cpls[newMapKey] = i
-				c.todo = append(c.todo, newJob)
+				c.info.cpls[newMapKey] = i
+				c.info.todo = append(c.info.todo, newJob)
 			}
 		}
 
 	case *EventCrawlNodeFailure[K, N]:
+		if c.info == nil {
+			return &StateCrawlIdle{}
+		} else if c.info.queryID != tev.QueryID {
+			// if we don't know this query, pretend it was a poll by breaking
+			break
+		}
+
 		span.RecordError(tev.Error)
 		job := crawlJob[K, N]{
 			node:   tev.NodeID,
@@ -181,13 +205,13 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 		}
 
 		mapKey := job.mapKey()
-		if _, found := c.waiting[mapKey]; !found {
+		if _, found := c.info.waiting[mapKey]; !found {
 			break
 		}
 
-		delete(c.waiting, mapKey)
-		c.failed[mapKey] = tev.NodeID
-		c.errors[mapKey] = tev.Error
+		delete(c.info.waiting, mapKey)
+		c.info.failed[mapKey] = tev.NodeID
+		c.info.errors[mapKey] = tev.Error
 
 	case *EventCrawlPoll:
 		// no event to process
@@ -195,50 +219,59 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 		panic(fmt.Sprintf("unexpected event: %T", tev))
 	}
 
-	if len(c.waiting) >= c.cfg.MaxCPL*c.cfg.Concurrency {
+	if c.info == nil {
+		return &StateCrawlIdle{}
+	}
+
+	if len(c.info.waiting) >= c.cfg.MaxCPL*c.cfg.Concurrency {
 		return &StateCrawlWaitingAtCapacity{
-			QueryID: c.id,
+			QueryID: c.info.queryID,
 		}
 	}
 
-	if len(c.todo) > 0 {
+	if len(c.info.todo) > 0 {
 
 		// pop next crawl job from queue
 		var job crawlJob[K, N]
-		job, c.todo = c.todo[0], c.todo[1:]
+		job, c.info.todo = c.info.todo[0], c.info.todo[1:]
 
 		// mark the job as waiting
 		mapKey := job.mapKey()
-		c.waiting[mapKey] = job.node
+		c.info.waiting[mapKey] = job.node
 
 		return &StateCrawlFindCloser[K, N]{
-			QueryID: c.id,
+			QueryID: c.info.queryID,
 			Target:  job.target,
 			NodeID:  job.node,
 		}
 	}
 
-	if len(c.waiting) > 0 {
+	if len(c.info.waiting) > 0 {
 		return &StateCrawlWaitingWithCapacity{
-			QueryID: c.id,
+			QueryID: c.info.queryID,
 		}
 	}
 
+	c.info = nil
 	return &StateCrawlFinished{}
 }
 
-func (c *Crawl[K, N, M]) setMapSizes(span trace.Span, prefix string) {
+func (c *Crawl[K, N]) setMapSizes(span trace.Span, prefix string) {
+	if c.info == nil {
+		return
+	}
+
 	span.SetAttributes(
-		attribute.Int(prefix+"_todo", len(c.todo)),
-		attribute.Int(prefix+"_cpls", len(c.cpls)),
-		attribute.Int(prefix+"_waiting", len(c.waiting)),
-		attribute.Int(prefix+"_success", len(c.success)),
-		attribute.Int(prefix+"_failed", len(c.failed)),
-		attribute.Int(prefix+"_errors", len(c.errors)),
+		attribute.Int(prefix+"_todo", len(c.info.todo)),
+		attribute.Int(prefix+"_cpls", len(c.info.cpls)),
+		attribute.Int(prefix+"_waiting", len(c.info.waiting)),
+		attribute.Int(prefix+"_success", len(c.info.success)),
+		attribute.Int(prefix+"_failed", len(c.info.failed)),
+		attribute.Int(prefix+"_errors", len(c.info.errors)),
 	)
 }
 
-func (c *Crawl[K, N, M]) mapKey(node N, target K) string {
+func (c *Crawl[K, N]) mapKey(node N, target K) string {
 	job := crawlJob[K, N]{node: node, target: target}
 	return job.mapKey()
 }
@@ -258,7 +291,9 @@ type CrawlState interface {
 
 type StateCrawlIdle struct{}
 
-type StateCrawlFinished struct{}
+type StateCrawlFinished struct {
+	QueryID coordt.QueryID
+}
 
 type StateCrawlWaitingAtCapacity struct {
 	QueryID coordt.QueryID
@@ -287,22 +322,31 @@ type CrawlEvent interface {
 // EventCrawlPoll is an event that signals a [Crawl] that it can perform housekeeping work.
 type EventCrawlPoll struct{}
 
-type EventCrawlCancel struct{}
+// type EventCrawlCancel struct{} // TODO: implement
+
+type EventCrawlStart[K kad.Key[K], N kad.NodeID[K]] struct {
+	QueryID coordt.QueryID
+	Seed    []N
+}
 
 type EventCrawlNodeResponse[K kad.Key[K], N kad.NodeID[K]] struct {
+	QueryID     coordt.QueryID
 	NodeID      N   // the node the message was sent to
 	Target      K   // the key that the node was asked for
 	CloserNodes []N // the closer nodes sent by the node
 }
 
 type EventCrawlNodeFailure[K kad.Key[K], N kad.NodeID[K]] struct {
-	NodeID N     // the node the message was sent to
-	Target K     // the key that the node was asked for
-	Error  error // the error that caused the failure, if any
+	QueryID coordt.QueryID
+	NodeID  N     // the node the message was sent to
+	Target  K     // the key that the node was asked for
+	Error   error // the error that caused the failure, if any
 }
 
 // crawlEvent() ensures that only events accepted by [Crawl] can be assigned to a [CrawlEvent].
-func (*EventCrawlPoll) crawlEvent()               {}
-func (*EventCrawlCancel) crawlEvent()             {}
+func (*EventCrawlPoll) crawlEvent() {}
+
+// func (*EventCrawlCancel) crawlEvent()             {}
+func (*EventCrawlStart[K, N]) crawlEvent()        {}
 func (*EventCrawlNodeResponse[K, N]) crawlEvent() {}
 func (*EventCrawlNodeFailure[K, N]) crawlEvent()  {}
