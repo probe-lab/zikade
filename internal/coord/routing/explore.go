@@ -186,7 +186,6 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 	e.counterFindSent, err = cfg.Meter.Int64Counter(
 		"explore_find_sent",
 		metric.WithDescription("Total number of find closer nodes requests sent by the explore state machine"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create explore_find_sent counter: %w", err)
@@ -195,7 +194,6 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 	e.counterFindSucceeded, err = cfg.Meter.Int64Counter(
 		"explore_find_succeeded",
 		metric.WithDescription("Total number of find closer nodes requests sent by the explore state machine that were successful"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create explore_find_succeeded counter: %w", err)
@@ -204,7 +202,6 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 	e.counterFindFailed, err = cfg.Meter.Int64Counter(
 		"explore_find_failed",
 		metric.WithDescription("Total number of find closer nodes requests sent by the explore state machine that failed"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create explore_find_failed counter: %w", err)
@@ -213,7 +210,6 @@ func NewExplore[K kad.Key[K], N kad.NodeID[K]](self N, rt RoutingTableCpl[K, N],
 	e.gaugeRunning, err = cfg.Meter.Int64ObservableGauge(
 		"explore_running",
 		metric.WithDescription("Whether or not the an explore is running for a cpl"),
-		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
 			if e.running.Load() {
 				o.Observe(1, metric.WithAttributeSet(e.cplAttributeSet.Load().(attribute.Set)))

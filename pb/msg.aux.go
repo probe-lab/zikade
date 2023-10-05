@@ -3,6 +3,7 @@ package pb
 import (
 	"bytes"
 	"fmt"
+	math_bits "math/bits"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -114,6 +115,41 @@ func (m *Message) CloserNodes() []kadt.PeerID {
 	return ids
 }
 
+func (m *Message) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Type != 0 {
+		n += 1 + sovDht(uint64(m.Type))
+	}
+	l = len(m.Key)
+	if l > 0 {
+		n += 1 + l + sovDht(uint64(l))
+	}
+	if m.Record != nil {
+		l = m.Record.Size()
+		n += 1 + l + sovDht(uint64(l))
+	}
+	if len(m.CloserPeers) > 0 {
+		for _, e := range m.CloserPeers {
+			l = e.Size()
+			n += 1 + l + sovDht(uint64(l))
+		}
+	}
+	if len(m.ProviderPeers) > 0 {
+		for _, e := range m.ProviderPeers {
+			l = e.Size()
+			n += 1 + l + sovDht(uint64(l))
+		}
+	}
+	if m.ClusterLevelRaw != 0 {
+		n += 1 + sovDht(uint64(m.ClusterLevelRaw))
+	}
+	return n
+}
+
 // Addresses returns the Multiaddresses associated with the Message_Peer entry
 func (m *Message_Peer) Addresses() []ma.Multiaddr {
 	if m == nil {
@@ -132,4 +168,28 @@ func (m *Message_Peer) Addresses() []ma.Multiaddr {
 	}
 
 	return maddrs
+}
+
+func (m *Message_Peer) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Id)
+	n += 1 + l + sovDht(uint64(l))
+	if len(m.Addrs) > 0 {
+		for _, b := range m.Addrs {
+			l = len(b)
+			n += 1 + l + sovDht(uint64(l))
+		}
+	}
+	if m.Connection != 0 {
+		n += 1 + sovDht(uint64(m.Connection))
+	}
+	return n
+}
+
+func sovDht(x uint64) (n int) {
+	return (math_bits.Len64(x|1) + 6) / 7
 }

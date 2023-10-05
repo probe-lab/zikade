@@ -138,7 +138,6 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (
 	b.counterFindSent, err = cfg.Meter.Int64Counter(
 		"bootstrap_find_sent",
 		metric.WithDescription("Total number of find closer nodes requests sent by the bootstrap state machine"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create bootstrap_find_sent counter: %w", err)
@@ -147,7 +146,6 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (
 	b.counterFindSucceeded, err = cfg.Meter.Int64Counter(
 		"bootstrap_find_succeeded",
 		metric.WithDescription("Total number of find closer nodes requests sent by the bootstrap state machine that were successful"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create bootstrap_find_succeeded counter: %w", err)
@@ -156,7 +154,6 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (
 	b.counterFindFailed, err = cfg.Meter.Int64Counter(
 		"bootstrap_find_failed",
 		metric.WithDescription("Total number of find closer nodes requests sent by the bootstrap state machine that failed"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create bootstrap_find_failed counter: %w", err)
@@ -165,7 +162,6 @@ func NewBootstrap[K kad.Key[K], N kad.NodeID[K]](self N, cfg *BootstrapConfig) (
 	b.gaugeRunning, err = cfg.Meter.Int64ObservableGauge(
 		"bootstrap_running",
 		metric.WithDescription("Whether or not the bootstrap is running"),
-		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
 			if b.running.Load() {
 				o.Observe(1)

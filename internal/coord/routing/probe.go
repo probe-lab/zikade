@@ -177,7 +177,6 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 	p.counterChecksSent, err = cfg.Meter.Int64Counter(
 		"probe_checks_sent",
 		metric.WithDescription("Total number of connectivity checks sent by the probe state machine"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create probe_checks_sent counter: %w", err)
@@ -186,7 +185,6 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 	p.counterChecksPassed, err = cfg.Meter.Int64Counter(
 		"probe_checks_passed",
 		metric.WithDescription("Total number of connectivity checks sent by the probe state machine that were successful"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create probe_checks_passed counter: %w", err)
@@ -195,7 +193,6 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 	p.counterChecksFailed, err = cfg.Meter.Int64Counter(
 		"probe_checks_failed",
 		metric.WithDescription("Total number of connectivity checks sent by the probe state machine that failed"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create probe_checks_failed counter: %w", err)
@@ -204,7 +201,6 @@ func NewProbe[K kad.Key[K], N kad.NodeID[K]](rt RoutingTableCpl[K, N], cfg *Prob
 	p.gaugePendingCount, err = cfg.Meter.Int64ObservableGauge(
 		"probe_pending_count",
 		metric.WithDescription("Total number of nodes being monitored by the probe state machine"),
-		metric.WithUnit("1"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
 			o.Observe(p.pendingCount.Load())
 			return nil
