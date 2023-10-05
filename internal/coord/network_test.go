@@ -8,8 +8,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/internal/coord/internal/nettest"
 	"github.com/plprobelab/zikade/internal/kadtest"
+	"github.com/plprobelab/zikade/internal/nettest"
 )
 
 // TODO: this is just a basic is-it-working test that needs to be improved

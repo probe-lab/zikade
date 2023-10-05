@@ -7,7 +7,7 @@ import (
 	"github.com/plprobelab/go-libdht/kad/key"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/coord/internal/tiny"
+	"github.com/plprobelab/zikade/internal/tiny"
 )
 
 var (
