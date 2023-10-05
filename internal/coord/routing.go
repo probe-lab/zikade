@@ -348,7 +348,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	probeCfg.Concurrency = cfg.ProbeRequestConcurrency
 	probeCfg.CheckInterval = cfg.ProbeCheckInterval
 
-	probe, err := routing.NewProbe[kadt.Key](rt, probeCfg)
+	probe, err := routing.NewProbe[kadt.Key, kadt.PeerID](rt, probeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("probe: %w", err)
 	}
@@ -366,7 +366,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 		return nil, fmt.Errorf("explore schedule: %w", err)
 	}
 
-	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID[kadt.Key], schedule, exploreCfg)
+	explore, err := routing.NewExplore[kadt.Key, kadt.PeerID](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
 	if err != nil {
 		return nil, fmt.Errorf("explore: %w", err)
 	}

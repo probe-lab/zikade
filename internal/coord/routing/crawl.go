@@ -7,6 +7,7 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-libdht/kad"
 	"github.com/plprobelab/go-libdht/kad/key"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/plprobelab/zikade/errs"
@@ -109,7 +110,9 @@ func NewCrawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt
 
 func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlState) {
 	ctx, span := tele.StartSpan(ctx, "Crawl.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	c.setMapSizes(span, "before")
 	defer func() {
+		c.setMapSizes(span, "after")
 		span.SetAttributes(tele.AttrOutEvent(out))
 		span.End()
 	}()
@@ -118,6 +121,8 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 	case *EventCrawlCancel:
 		// TODO: ...
 	case *EventCrawlNodeResponse[K, N]:
+		span.SetAttributes(attribute.Int("closer_nodes", len(tev.CloserNodes)))
+
 		job := crawlJob[K, N]{
 			node:   tev.NodeID,
 			target: tev.Target,
@@ -145,17 +150,17 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 				}
 
 				newMapKey := newJob.mapKey()
-
 				if _, found := c.cpls[newMapKey]; found {
 					continue
 				}
 
 				c.cpls[newMapKey] = i
-				c.todo = append(c.todo, job)
+				c.todo = append(c.todo, newJob)
 			}
 		}
 
 	case *EventCrawlNodeFailure[K, N]:
+		span.RecordError(tev.Error)
 		job := crawlJob[K, N]{
 			node:   tev.NodeID,
 			target: tev.Target,
@@ -189,7 +194,8 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 		job, c.todo = c.todo[0], c.todo[1:]
 
 		// mark the job as waiting
-		c.waiting[job.mapKey()] = job.node
+		mapKey := job.mapKey()
+		c.waiting[mapKey] = job.node
 
 		return &StateCrawlFindCloser[K, N]{
 			QueryID: c.id,
@@ -205,6 +211,22 @@ func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlS
 	}
 
 	return &StateCrawlFinished{}
+}
+
+func (c *Crawl[K, N, M]) setMapSizes(span trace.Span, prefix string) {
+	span.SetAttributes(
+		attribute.Int(prefix+"_todo", len(c.todo)),
+		attribute.Int(prefix+"_cpls", len(c.cpls)),
+		attribute.Int(prefix+"_waiting", len(c.waiting)),
+		attribute.Int(prefix+"_success", len(c.success)),
+		attribute.Int(prefix+"_failed", len(c.failed)),
+		attribute.Int(prefix+"_errors", len(c.errors)),
+	)
+}
+
+func (c *Crawl[K, N, M]) mapKey(node N, target K) string {
+	job := crawlJob[K, N]{node: node, target: target}
+	return job.mapKey()
 }
 
 type crawlJob[K kad.Key[K], N kad.NodeID[K]] struct {
