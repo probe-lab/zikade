@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-libdht/kad"
 	"github.com/plprobelab/go-libdht/kad/key"
 	"go.opentelemetry.io/otel/attribute"
@@ -17,19 +16,34 @@ import (
 
 // CrawlConfig specifies optional configuration for a Crawl
 type CrawlConfig struct {
-	MaxCPL      int         // the maximum CPL until we should crawl the peer
-	Concurrency int         // the maximum number of concurrent peers that we may query
-	Clock       clock.Clock // a clock that may replaced by a mock when testing
+	MaxCPL      int          // the maximum CPL until we should crawl the peer
+	Concurrency int          // the maximum number of concurrent peers that we may query
+	Tracer      trace.Tracer // Tracer is the tracer that should be used to trace execution.
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
 func (cfg *CrawlConfig) Validate() error {
-	if cfg.Clock == nil {
+	if cfg.MaxCPL < 1 {
 		return &errs.ConfigurationError{
 			Component: "CrawlConfig",
-			Err:       fmt.Errorf("clock must not be nil"),
+			Err:       fmt.Errorf("max cpl must be greater than zero"),
 		}
 	}
+
+	if cfg.Concurrency < 1 {
+		return &errs.ConfigurationError{
+			Component: "CrawlConfig",
+			Err:       fmt.Errorf("concurrency must be greater than zero"),
+		}
+	}
+
+	if cfg.Tracer == nil {
+		return &errs.ConfigurationError{
+			Component: "CrawlConfig",
+			Err:       fmt.Errorf("tracer must not be nil"),
+		}
+	}
+
 	return nil
 }
 
@@ -39,7 +53,7 @@ func DefaultCrawlConfig() *CrawlConfig {
 	return &CrawlConfig{
 		MaxCPL:      16,
 		Concurrency: 1,
-		Clock:       clock.New(), // use standard time
+		Tracer:      tele.NoopTracer(),
 	}
 }
 
@@ -109,7 +123,7 @@ func NewCrawl[K kad.Key[K], N kad.NodeID[K], M coordt.Message](self N, id coordt
 }
 
 func (c *Crawl[K, N, M]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlState) {
-	ctx, span := tele.StartSpan(ctx, "Crawl.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
+	_, span := c.cfg.Tracer.Start(ctx, "Crawl.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
 	c.setMapSizes(span, "before")
 	defer func() {
 		c.setMapSizes(span, "after")

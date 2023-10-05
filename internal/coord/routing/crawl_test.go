@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -14,6 +13,35 @@ import (
 )
 
 var _ coordt.StateMachine[CrawlEvent, CrawlState] = (*Crawl[tiny.Key, tiny.Node, tiny.Message])(nil)
+
+func TestCrawlConfig_Validate(t *testing.T) {
+	t.Run("default is valid", func(t *testing.T) {
+		cfg := DefaultCrawlConfig()
+		require.NoError(t, cfg.Validate())
+	})
+
+	t.Run("tracer is not nil", func(t *testing.T) {
+		cfg := DefaultCrawlConfig()
+		cfg.Tracer = nil
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("max cpl positive", func(t *testing.T) {
+		cfg := DefaultCrawlConfig()
+		cfg.MaxCPL = 0
+		require.Error(t, cfg.Validate())
+		cfg.MaxCPL = -1
+		require.Error(t, cfg.Validate())
+	})
+
+	t.Run("concurrency positive", func(t *testing.T) {
+		cfg := DefaultCrawlConfig()
+		cfg.Concurrency = 0
+		require.Error(t, cfg.Validate())
+		cfg.Concurrency = -1
+		require.Error(t, cfg.Validate())
+	})
+}
 
 func TestNewCrawl(t *testing.T) {
 	self := tiny.NewNode(0)
@@ -58,10 +86,7 @@ func TestCrawl_Advance(t *testing.T) {
 	c := tiny.NewNode(0b10100000)
 	seed := []tiny.Node{self, a, b}
 
-	clk := clock.NewMock()
-
 	cfg := DefaultCrawlConfig()
-	cfg.Clock = clk
 	cfg.MaxCPL = 4
 	cfg.Concurrency = 2
 
