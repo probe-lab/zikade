@@ -52,12 +52,8 @@ func (trw testReadWriter) WriteMsg(msg *pb.Message) error {
 
 func newPeerPair(t testing.TB) (host.Host, *DHT) {
 	listenAddr := libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0")
-
-	client, err := libp2p.New(listenAddr)
-	require.NoError(t, err)
-
-	server, err := libp2p.New(listenAddr)
-	require.NoError(t, err)
+	client := newTestHost(t, listenAddr)
+	server := newTestHost(t, listenAddr)
 
 	cfg := DefaultConfig()
 	cfg.Mode = ModeOptServer

@@ -8,8 +8,6 @@ import (
 	"github.com/benbjohnson/clock"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/net/swarm"
-	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/stretchr/testify/require"
 
 	"github.com/plprobelab/zikade/internal/coord"
@@ -42,13 +40,9 @@ func (t *Topology) SetClock(clk clock.Clock) {
 func (t *Topology) AddServer(cfg *Config) *DHT {
 	t.tb.Helper()
 
-	listenAddr := libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0")
-
-	h, err := libp2p.New(append(t.hostOpts(), listenAddr)...)
-	require.NoError(t.tb, err)
-
+	h := newTestHost(t.tb, libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	t.tb.Cleanup(func() {
-		if err = h.Close(); err != nil {
+		if err := h.Close(); err != nil {
 			t.tb.Logf("unexpected error when closing host: %s", err)
 		}
 	})
@@ -82,11 +76,9 @@ func (t *Topology) AddServer(cfg *Config) *DHT {
 func (t *Topology) AddClient(cfg *Config) *DHT {
 	t.tb.Helper()
 
-	h, err := libp2p.New(append(t.hostOpts(), libp2p.NoListenAddrs)...)
-	require.NoError(t.tb, err)
-
+	h := newTestHost(t.tb, libp2p.NoListenAddrs)
 	t.tb.Cleanup(func() {
-		if err = h.Close(); err != nil {
+		if err := h.Close(); err != nil {
 			t.tb.Logf("unexpected error when closing host: %s", err)
 		}
 	})
@@ -113,29 +105,6 @@ func (t *Topology) AddClient(cfg *Config) *DHT {
 	t.rns[did] = rn
 
 	return d
-}
-
-// hostOpts returns libp2p host options common to DHT clients and servers.
-func (t *Topology) hostOpts() []libp2p.Option {
-	// If two peers simultaneously connect, they could end up in a state where
-	// one peer is waiting on the connection for the other one, although there
-	// already exists a valid connection. The libp2p dial loop doesn't recognize
-	// the new connection immediately, but only after the local dial has timed
-	// out. By default, the timeout is set to 5s which results in failing tests
-	// as the tests time out. By setting the timeout to a much lower value, we
-	// work around the timeout issue. Try to remove the following swarm options
-	// after https://github.com/libp2p/go-libp2p/issues/2589 was resolved.
-	// Also, the below should be changed to [swarm.WithDialTimeoutLocal]. Change
-	// that after https://github.com/libp2p/go-libp2p/pull/2595 is resolved.
-	dialTimeout := 100 * time.Millisecond
-	swarmOpts := libp2p.SwarmOpts(swarm.WithDialTimeout(dialTimeout))
-
-	// The QUIC transport leaks go-routines, so we're only enabling the TCP
-	// transport for our tests. Remove after:
-	// https://github.com/libp2p/go-libp2p/issues/2514 was fixed
-	tcpTransport := libp2p.Transport(tcp.NewTCPTransport)
-
-	return []libp2p.Option{swarmOpts, tcpTransport}
 }
 
 func (t *Topology) makeid(d *DHT) string {

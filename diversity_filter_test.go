@@ -167,16 +167,10 @@ func TestRTPeerDiversityFilter(t *testing.T) {
 	ctx := context.Background()
 
 	listenOpt := libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0")
-
-	h, err := libp2p.New(listenOpt)
-	require.NoError(t, err)
-
+	h := newTestHost(t, listenOpt)
 	// create 2 remote peers
-	h1, err := libp2p.New(listenOpt)
-	require.NoError(t, err)
-
-	h2, err := libp2p.New(listenOpt)
-	require.NoError(t, err)
+	h1 := newTestHost(t, listenOpt)
+	h2 := newTestHost(t, listenOpt)
 
 	// clean up after ourselves
 	t.Cleanup(func() {
