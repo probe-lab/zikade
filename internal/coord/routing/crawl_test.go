@@ -305,7 +305,7 @@ func TestCrawl_Advance_unrelated_response(t *testing.T) {
 
 	// send it an unrelated response
 	state = qry.Advance(ctx, &EventCrawlNodeResponse[tiny.Key, tiny.Node]{
-		QueryID:     coordt.QueryID("another"),
+		QueryID:     "another",
 		NodeID:      tstate.NodeID,
 		Target:      tstate.Target,
 		CloserNodes: []tiny.Node{},
@@ -314,7 +314,7 @@ func TestCrawl_Advance_unrelated_response(t *testing.T) {
 
 	// send it an unrelated response
 	state = qry.Advance(ctx, &EventCrawlNodeFailure[tiny.Key, tiny.Node]{
-		QueryID: coordt.QueryID("another"),
+		QueryID: "another",
 		NodeID:  tstate.NodeID,
 		Target:  tstate.Target,
 		Error:   fmt.Errorf("some error"),

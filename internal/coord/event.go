@@ -245,3 +245,9 @@ type EventRoutingPoll struct{}
 
 func (*EventRoutingPoll) behaviourEvent() {}
 func (*EventRoutingPoll) routingCommand() {}
+
+type EventStartCrawl struct {
+	Seed []kadt.PeerID
+}
+
+func (*EventStartCrawl) behaviourEvent() {}

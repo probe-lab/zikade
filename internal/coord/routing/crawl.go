@@ -14,6 +14,9 @@ import (
 	"github.com/plprobelab/zikade/tele"
 )
 
+// CrawlQueryID is the id for the query operated by the crawl state machine
+const CrawlQueryID = coordt.QueryID("crawl")
+
 // CrawlConfig specifies optional configuration for a Crawl
 type CrawlConfig struct {
 	MaxCPL      int          // the maximum CPL until we should crawl the peer
@@ -65,7 +68,6 @@ type Crawl[K kad.Key[K], N kad.NodeID[K]] struct {
 }
 
 type crawlInformation[K kad.Key[K], N kad.NodeID[K]] struct {
-	queryID coordt.QueryID
 	todo    []crawlJob[K, N]
 	cpls    map[string]int
 	waiting map[string]N
@@ -109,7 +111,6 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 		span.SetAttributes(attribute.Int("seed", len(tev.Seed)))
 
 		ci := &crawlInformation[K, N]{
-			queryID: tev.QueryID,
 			todo:    []crawlJob[K, N]{},
 			cpls:    map[string]int{},
 			waiting: map[string]N{},
@@ -149,9 +150,6 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 
 		if c.info == nil {
 			return &StateCrawlIdle{}
-		} else if c.info.queryID != tev.QueryID {
-			// if we don't know this query, pretend it was a poll by breaking
-			break
 		}
 
 		job := crawlJob[K, N]{
@@ -193,9 +191,6 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 	case *EventCrawlNodeFailure[K, N]:
 		if c.info == nil {
 			return &StateCrawlIdle{}
-		} else if c.info.queryID != tev.QueryID {
-			// if we don't know this query, pretend it was a poll by breaking
-			break
 		}
 
 		span.RecordError(tev.Error)
@@ -224,9 +219,7 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 	}
 
 	if len(c.info.waiting) >= c.cfg.MaxCPL*c.cfg.Concurrency {
-		return &StateCrawlWaitingAtCapacity{
-			QueryID: c.info.queryID,
-		}
+		return &StateCrawlWaitingAtCapacity{}
 	}
 
 	if len(c.info.todo) > 0 {
@@ -240,16 +233,13 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 		c.info.waiting[mapKey] = job.node
 
 		return &StateCrawlFindCloser[K, N]{
-			QueryID: c.info.queryID,
-			Target:  job.target,
-			NodeID:  job.node,
+			Target: job.target,
+			NodeID: job.node,
 		}
 	}
 
 	if len(c.info.waiting) > 0 {
-		return &StateCrawlWaitingWithCapacity{
-			QueryID: c.info.queryID,
-		}
+		return &StateCrawlWaitingWithCapacity{}
 	}
 
 	c.info = nil
@@ -291,21 +281,14 @@ type CrawlState interface {
 
 type StateCrawlIdle struct{}
 
-type StateCrawlFinished struct {
-	QueryID coordt.QueryID
-}
+type StateCrawlFinished struct{}
 
-type StateCrawlWaitingAtCapacity struct {
-	QueryID coordt.QueryID
-}
-type StateCrawlWaitingWithCapacity struct {
-	QueryID coordt.QueryID
-}
+type StateCrawlWaitingAtCapacity struct{}
+type StateCrawlWaitingWithCapacity struct{}
 
 type StateCrawlFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID coordt.QueryID
-	Target  K // the key that the query wants to find closer nodes for
-	NodeID  N // the node to send the message to
+	Target K // the key that the query wants to find closer nodes for
+	NodeID N // the node to send the message to
 }
 
 // crawlState() ensures that only [Crawl] states can be assigned to a CrawlState.
@@ -325,22 +308,19 @@ type EventCrawlPoll struct{}
 // type EventCrawlCancel struct{} // TODO: implement
 
 type EventCrawlStart[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID coordt.QueryID
-	Seed    []N
+	Seed []N
 }
 
 type EventCrawlNodeResponse[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID     coordt.QueryID
 	NodeID      N   // the node the message was sent to
 	Target      K   // the key that the node was asked for
 	CloserNodes []N // the closer nodes sent by the node
 }
 
 type EventCrawlNodeFailure[K kad.Key[K], N kad.NodeID[K]] struct {
-	QueryID coordt.QueryID
-	NodeID  N     // the node the message was sent to
-	Target  K     // the key that the node was asked for
-	Error   error // the error that caused the failure, if any
+	NodeID N     // the node the message was sent to
+	Target K     // the key that the node was asked for
+	Error  error // the error that caused the failure, if any
 }
 
 // crawlEvent() ensures that only events accepted by [Crawl] can be assigned to a [CrawlEvent].
