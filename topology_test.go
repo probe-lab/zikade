@@ -9,9 +9,11 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
+	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/stretchr/testify/require"
+
 	"github.com/plprobelab/zikade/internal/coord"
 	"github.com/plprobelab/zikade/kadt"
-	"github.com/stretchr/testify/require"
 )
 
 // A Topology is an arrangement of DHTs intended to simulate a network
@@ -128,7 +130,12 @@ func (t *Topology) hostOpts() []libp2p.Option {
 	dialTimeout := 100 * time.Millisecond
 	swarmOpts := libp2p.SwarmOpts(swarm.WithDialTimeout(dialTimeout))
 
-	return []libp2p.Option{swarmOpts}
+	// The QUIC transport leaks go-routines, so we're only enabling the TCP
+	// transport for our tests. Remove after:
+	// https://github.com/libp2p/go-libp2p/issues/2514 was fixed
+	tcpTransport := libp2p.Transport(tcp.NewTCPTransport)
+
+	return []libp2p.Option{swarmOpts, tcpTransport}
 }
 
 func (t *Topology) makeid(d *DHT) string {
