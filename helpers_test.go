@@ -34,7 +34,7 @@ func newTestHost(t testing.TB, opts ...libp2p.Option) host.Host {
 	// after https://github.com/libp2p/go-libp2p/issues/2589 was resolved.
 	// Also, the below should be changed to [swarm.WithDialTimeoutLocal]. Change
 	// that after https://github.com/libp2p/go-libp2p/pull/2595 is resolved.
-	dialTimeout := 100 * time.Millisecond
+	dialTimeout := 500 * time.Millisecond
 	swarmOpts := libp2p.SwarmOpts(swarm.WithDialTimeout(dialTimeout))
 
 	// The QUIC transport leaks go-routines, so we're only enabling the TCP
