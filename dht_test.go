@@ -16,10 +16,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	h, err := libp2p.New(libp2p.NoListenAddrs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := newTestHost(t, libp2p.NoListenAddrs)
 
 	tests := []struct {
 		name        string

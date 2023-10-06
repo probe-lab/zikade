@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"reflect"
 	"strconv"
 	"sync"
@@ -14,9 +13,7 @@ import (
 
 	"github.com/benbjohnson/clock"
 	"github.com/ipfs/boxo/ipns"
-	"github.com/ipfs/boxo/path"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/libp2p/go-libp2p"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -29,74 +26,6 @@ import (
 	"github.com/plprobelab/zikade/kadt"
 	"github.com/plprobelab/zikade/pb"
 )
-
-var rng = rand.New(rand.NewSource(1337))
-
-func newTestDHT(t testing.TB) *DHT {
-	cfg := DefaultConfig()
-	cfg.Logger = devnull
-
-	return newTestDHTWithConfig(t, cfg)
-}
-
-func newTestDHTWithConfig(t testing.TB, cfg *Config) *DHT {
-	t.Helper()
-
-	h, err := libp2p.New(libp2p.NoListenAddrs)
-	require.NoError(t, err)
-
-	d, err := New(h, cfg)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		if err = d.Close(); err != nil {
-			t.Logf("closing dht: %s", err)
-		}
-
-		if err = h.Close(); err != nil {
-			t.Logf("closing host: %s", err)
-		}
-	})
-
-	return d
-}
-
-func newPeerID(t testing.TB) peer.ID {
-	id, _ := newIdentity(t)
-	return id
-}
-
-func newIdentity(t testing.TB) (peer.ID, crypto.PrivKey) {
-	t.Helper()
-
-	priv, pub, err := crypto.GenerateEd25519Key(rng)
-	require.NoError(t, err)
-
-	id, err := peer.IDFromPublicKey(pub)
-	require.NoError(t, err)
-
-	return id, priv
-}
-
-// fillRoutingTable populates d's routing table and peerstore with n random peers and addresses
-func fillRoutingTable(t testing.TB, d *DHT, n int) {
-	t.Helper()
-
-	for i := 0; i < n; i++ {
-		// generate peer ID
-		pid := newPeerID(t)
-
-		// add peer to routing table
-		d.rt.AddNode(kadt.PeerID(pid))
-
-		// craft network address for peer
-		a, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 2000+i))
-		require.NoError(t, err)
-
-		// add peer information to peer store
-		d.host.Peerstore().AddAddr(pid, a, time.Hour)
-	}
-}
 
 func TestMessage_noKey(t *testing.T) {
 	d := newTestDHT(t)
@@ -449,23 +378,6 @@ func newPutIPNSRequest(t testing.TB, clk clock.Clock, priv crypto.PrivKey, seq u
 	}
 
 	return req
-}
-
-func makeIPNSKeyValue(t testing.TB, clk clock.Clock, priv crypto.PrivKey, seq uint64, ttl time.Duration) (string, []byte) {
-	t.Helper()
-
-	testPath := path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
-
-	rec, err := ipns.NewRecord(priv, testPath, seq, clk.Now().Add(ttl), ttl)
-	require.NoError(t, err)
-
-	remote, err := peer.IDFromPublicKey(priv.GetPublic())
-	require.NoError(t, err)
-
-	data, err := ipns.MarshalRecord(rec)
-	require.NoError(t, err)
-
-	return string(ipns.NameFromPeer(remote).RoutingKey()), data
 }
 
 func BenchmarkDHT_handlePutValue_unique_peers(b *testing.B) {
@@ -1195,28 +1107,6 @@ func TestDHT_handleGetValue_supports_providers(t *testing.T) {
 	set, found := be.cache.Get(cacheKey.String())
 	require.True(t, found)
 	assert.Len(t, set.providers, 1)
-}
-
-func newAddrInfo(t testing.TB) peer.AddrInfo {
-	return peer.AddrInfo{
-		ID: newPeerID(t),
-		Addrs: []ma.Multiaddr{
-			ma.StringCast("/ip4/99.99.99.99/tcp/2000"), // must be a public address
-		},
-	}
-}
-
-func newAddProviderRequest(key []byte, addrInfos ...peer.AddrInfo) *pb.Message {
-	providerPeers := make([]*pb.Message_Peer, len(addrInfos))
-	for i, addrInfo := range addrInfos {
-		providerPeers[i] = pb.FromAddrInfo(addrInfo)
-	}
-
-	return &pb.Message{
-		Type:          pb.Message_ADD_PROVIDER,
-		Key:           key,
-		ProviderPeers: providerPeers,
-	}
 }
 
 func BenchmarkDHT_handleAddProvider_unique_peers(b *testing.B) {

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
+	"github.com/ipfs/boxo/ipns"
+	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore/failstore"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -49,6 +51,23 @@ func makePkKeyValue(t testing.TB) (string, []byte) {
 	require.NoError(t, err)
 
 	return routing.KeyForPublicKey(id), v
+}
+
+func makeIPNSKeyValue(t testing.TB, clk clock.Clock, priv crypto.PrivKey, seq uint64, ttl time.Duration) (string, []byte) {
+	t.Helper()
+
+	testPath := path.Path("/ipfs/bafkqac3jobxhgidsn5rww4yk")
+
+	rec, err := ipns.NewRecord(priv, testPath, seq, clk.Now().Add(ttl), ttl)
+	require.NoError(t, err)
+
+	remote, err := peer.IDFromPublicKey(priv.GetPublic())
+	require.NoError(t, err)
+
+	data, err := ipns.MarshalRecord(rec)
+	require.NoError(t, err)
+
+	return string(ipns.NameFromPeer(remote).RoutingKey()), data
 }
 
 func TestDHT_FindPeer_happy_path(t *testing.T) {

@@ -22,8 +22,7 @@ import (
 var devnull = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func newBackendProvider(t testing.TB, cfg *ProvidersBackendConfig) *ProvidersBackend {
-	h, err := libp2p.New(libp2p.NoListenAddrs)
-	require.NoError(t, err)
+	h := newTestHost(t, libp2p.NoListenAddrs)
 
 	dstore, err := InMemoryDatastore()
 	require.NoError(t, err)
