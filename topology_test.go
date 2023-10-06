@@ -123,8 +123,10 @@ func (t *Topology) hostOpts() []libp2p.Option {
 	// as the tests time out. By setting the timeout to a much lower value, we
 	// work around the timeout issue. Try to remove the following swarm options
 	// after https://github.com/libp2p/go-libp2p/issues/2589 was resolved.
-	localDialTimeout := 100 * time.Millisecond
-	swarmOpts := libp2p.SwarmOpts(swarm.WithDialTimeoutLocal(localDialTimeout))
+	// Also, the below should be changed to [swarm.WithDialTimeoutLocal]. Change
+	// that after https://github.com/libp2p/go-libp2p/pull/2595 is resolved.
+	dialTimeout := 100 * time.Millisecond
+	swarmOpts := libp2p.SwarmOpts(swarm.WithDialTimeout(dialTimeout))
 
 	return []libp2p.Option{swarmOpts}
 }
