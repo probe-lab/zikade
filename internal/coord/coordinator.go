@@ -278,48 +278,16 @@ func (c *Coordinator) SetRoutingNotifier(rn RoutingNotifier) {
 	c.routingNotifierMu.Unlock()
 }
 
-// GetNode retrieves the node associated with the given node id from the DHT's local routing table.
-// If the node isn't found in the table, it returns ErrNodeNotFound.
-func (c *Coordinator) GetNode(ctx context.Context, id kadt.PeerID) (coordt.Node, error) {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetNode")
-	defer span.End()
-	if _, exists := c.rt.GetNode(id.Key()); !exists {
-		return nil, coordt.ErrNodeNotFound
-	}
+// IsRoutable reports whether the supplied node is present in the local routing table.
+func (c *Coordinator) IsRoutable(ctx context.Context, id kadt.PeerID) bool {
+	_, exists := c.rt.GetNode(id.Key())
 
-	nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return nh, nil
+	return exists
 }
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
-func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]coordt.Node, error) {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetClosestNodes")
-	defer span.End()
-	closest := c.rt.NearestNodes(k, n)
-	nodes := make([]coordt.Node, 0, len(closest))
-	for _, id := range closest {
-		nh, err := c.networkBehaviour.getNodeHandler(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		nodes = append(nodes, nh)
-	}
-	return nodes, nil
-}
-
-// GetValue requests that the node return any value associated with the supplied key.
-// If the node does not have a value for the key it returns ErrValueNotFound.
-func (c *Coordinator) GetValue(ctx context.Context, k kadt.Key) (coordt.Value, error) {
-	panic("not implemented")
-}
-
-// PutValue requests that the node stores a value to be associated with the supplied key.
-// If the node cannot or chooses not to store the value for the key it returns ErrValueNotAccepted.
-func (c *Coordinator) PutValue(ctx context.Context, r coordt.Value, q int) error {
-	panic("not implemented")
+func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]kadt.PeerID, error) {
+	return c.rt.NearestNodes(k, n), nil
 }
 
 // QueryClosest starts a query that attempts to find the closest nodes to the target key.
@@ -341,14 +309,9 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seeds, err := c.GetClosestNodes(ctx, target, 20)
+	seedIDs, err := c.GetClosestNodes(ctx, target, 20)
 	if err != nil {
 		return nil, coordt.QueryStats{}, err
-	}
-
-	seedIDs := make([]kadt.PeerID, 0, len(seeds))
-	for _, s := range seeds {
-		seedIDs = append(seedIDs, s.ID())
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
@@ -394,14 +357,9 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 		numResults = 20 // TODO: parameterize
 	}
 
-	seeds, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
+	seedIDs, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
 	if err != nil {
 		return nil, coordt.QueryStats{}, err
-	}
-
-	seedIDs := make([]kadt.PeerID, 0, len(seeds))
-	for _, s := range seeds {
-		seedIDs = append(seedIDs, s.ID())
 	}
 
 	waiter := NewWaiter[BehaviourEvent]()
@@ -434,14 +392,9 @@ func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) erro
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seedNodes, err := c.GetClosestNodes(ctx, msg.Target(), 20) // TODO: parameterize
+	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20) // TODO: parameterize
 	if err != nil {
 		return err
-	}
-
-	seeds := make([]kadt.PeerID, 0, len(seedNodes))
-	for _, s := range seedNodes {
-		seeds = append(seeds, s.ID())
 	}
 	return c.broadcast(ctx, msg, seeds, brdcst.DefaultConfigFollowUp())
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/coord/coordt"
 	"github.com/plprobelab/zikade/internal/kadtest"
 	"github.com/plprobelab/zikade/kadt"
 )
@@ -79,8 +78,7 @@ func TestAddAddresses(t *testing.T) {
 	remote := top.AddServer(nil)
 
 	// local routing table should not contain the node
-	_, err := local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
-	require.ErrorIs(t, err, coordt.ErrNodeNotFound)
+	require.False(t, local.kad.IsRoutable(ctx, kadt.PeerID(remote.host.ID())))
 
 	remoteAddrInfo := peer.AddrInfo{
 		ID:    remote.host.ID(),
@@ -90,7 +88,7 @@ func TestAddAddresses(t *testing.T) {
 	require.NotEmpty(t, remoteAddrInfo.Addrs)
 
 	// Add remote's addresss to the local dht
-	err = local.AddAddresses(ctx, []peer.AddrInfo{remoteAddrInfo}, time.Minute)
+	err := local.AddAddresses(ctx, []peer.AddrInfo{remoteAddrInfo}, time.Minute)
 	require.NoError(t, err)
 
 	// the include state machine runs in the background and eventually should add the node to routing table
@@ -98,8 +96,7 @@ func TestAddAddresses(t *testing.T) {
 	require.NoError(t, err)
 
 	// the routing table should now contain the node
-	_, err = local.kad.GetNode(ctx, kadt.PeerID(remote.host.ID()))
-	require.NoError(t, err)
+	require.True(t, local.kad.IsRoutable(ctx, kadt.PeerID(remote.host.ID())))
 }
 
 func TestDHT_Close_idempotent(t *testing.T) {
