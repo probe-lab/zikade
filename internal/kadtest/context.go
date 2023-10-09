@@ -32,7 +32,7 @@ func CtxShort(t *testing.T) context.Context {
 }
 
 // CtxFull returns a Context for tests that might require extended time to complete. The
-// returned context will be cancelled just before the test binary deadline(as specified
+// returned context will be cancelled just before the test binary deadline (as specified
 // by the -timeout flag when running the test) if one has been set. If no timeout has
 // been set then the background context is returned.
 func CtxFull(t *testing.T) context.Context {
