@@ -280,8 +280,6 @@ func (c *Coordinator) SetRoutingNotifier(rn RoutingNotifier) {
 
 // IsRoutable reports whether the supplied node is present in the local routing table.
 func (c *Coordinator) IsRoutable(ctx context.Context, id kadt.PeerID) bool {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.IsRoutable")
-	defer span.End()
 	_, exists := c.rt.GetNode(id.Key())
 
 	return exists
@@ -289,8 +287,6 @@ func (c *Coordinator) IsRoutable(ctx context.Context, id kadt.PeerID) bool {
 
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]kadt.PeerID, error) {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.GetClosestNodes")
-	defer span.End()
 	return c.rt.NearestNodes(k, n), nil
 }
 
