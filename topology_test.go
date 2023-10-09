@@ -146,16 +146,14 @@ func (t *Topology) Connect(ctx context.Context, a *DHT, b *DHT) {
 	require.NoError(t.tb, err)
 
 	// the routing table should now contain the node
-	_, err = a.kad.GetNode(ctx, kadt.PeerID(b.host.ID()))
-	require.NoError(t.tb, err)
+	require.True(t.tb, a.kad.IsRoutable(ctx, kadt.PeerID(b.host.ID())))
 
 	// include state machine runs in the background for b and eventually should add the node to routing table
 	_, err = brn.ExpectRoutingUpdated(ctx, kadt.PeerID(a.host.ID()))
 	require.NoError(t.tb, err)
 
 	// the routing table should now contain the node
-	_, err = b.kad.GetNode(ctx, kadt.PeerID(a.host.ID()))
-	require.NoError(t.tb, err)
+	require.True(t.tb, b.kad.IsRoutable(ctx, kadt.PeerID(a.host.ID())))
 }
 
 // ConnectChain connects the DHTs in a linear chain.

@@ -26,25 +26,6 @@ type Value interface {
 	MarshalBinary() ([]byte, error)
 }
 
-// Node represents the local or a remote node participating in the DHT.
-type Node interface {
-	// ID returns the peer ID identifying this node.
-	ID() kadt.PeerID
-
-	// GetClosestNodes requests the n closest nodes to the key from the node's
-	// local routing table. The node may return fewer nodes than requested.
-	GetClosestNodes(ctx context.Context, key kadt.Key, n int) ([]Node, error)
-
-	// GetValue requests that the node return any value associated with the
-	// supplied key. If the node does not have a value for the key it returns
-	// ErrValueNotFound.
-	GetValue(ctx context.Context, key kadt.Key) (Value, error)
-
-	// PutValue requests that the node stores a value to be associated with the supplied key.
-	// If the node cannot or chooses not to store the value for the key it returns ErrValueNotAccepted.
-	PutValue(ctx context.Context, r Value, q int) error
-}
-
 var (
 	ErrNodeNotFound     = errors.New("node not found")
 	ErrValueNotFound    = errors.New("value not found")

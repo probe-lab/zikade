@@ -185,16 +185,13 @@ func TestBootstrap(t *testing.T) {
 	require.NoError(t, err)
 
 	// coordinator will have node1 in its routing table
-	_, err = d.GetNode(ctx, nodes[1].NodeID)
-	require.NoError(t, err)
+	require.True(t, d.IsRoutable(ctx, nodes[1].NodeID))
 
 	// coordinator should now have node2 in its routing table
-	_, err = d.GetNode(ctx, nodes[2].NodeID)
-	require.NoError(t, err)
+	require.True(t, d.IsRoutable(ctx, nodes[2].NodeID))
 
 	// coordinator should now have node3 in its routing table
-	_, err = d.GetNode(ctx, nodes[3].NodeID)
-	require.NoError(t, err)
+	require.True(t, d.IsRoutable(ctx, nodes[3].NodeID))
 }
 
 func TestIncludeNode(t *testing.T) {
@@ -219,8 +216,7 @@ func TestIncludeNode(t *testing.T) {
 	d.SetRoutingNotifier(rn)
 
 	// the routing table should not contain the node yet
-	_, err = d.GetNode(ctx, candidate)
-	require.ErrorIs(t, err, coordt.ErrNodeNotFound)
+	require.False(t, d.IsRoutable(ctx, candidate))
 
 	// inject a new node
 	err = d.AddNodes(ctx, []kadt.PeerID{candidate})
@@ -234,6 +230,5 @@ func TestIncludeNode(t *testing.T) {
 	require.Equal(t, candidate, tev.NodeID)
 
 	// the routing table should now contain the node
-	_, err = d.GetNode(ctx, candidate)
-	require.NoError(t, err)
+	require.True(t, d.IsRoutable(ctx, candidate))
 }
