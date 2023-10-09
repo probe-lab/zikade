@@ -2,7 +2,6 @@ package kadtest
 
 import (
 	"context"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -14,13 +13,7 @@ import (
 func CtxShort(t *testing.T) context.Context {
 	t.Helper()
 
-	var timeout time.Duration
-	// Increase the timeout for 32-bit Windows
-	if runtime.GOOS == "windows" && runtime.GOARCH == "386" {
-		timeout = 60 * time.Second
-	} else {
-		timeout = 10 * time.Second
-	}
+	timeout := 10 * time.Second
 	goal := time.Now().Add(timeout)
 
 	deadline, ok := t.Deadline()
@@ -33,6 +26,23 @@ func CtxShort(t *testing.T) context.Context {
 		}
 	}
 
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// CtxFull returns a Context for tests that might require extended time to complete. The
+// returned context will be cancelled just before the test binary deadline(as specified
+// by the -timeout flag when running the test) if one has been set. If no timeout has
+// been set then the background context is returned.
+func CtxFull(t *testing.T) context.Context {
+	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		return context.Background()
+	}
+
+	deadline = deadline.Add(-time.Second)
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	t.Cleanup(cancel)
 	return ctx

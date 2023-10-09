@@ -752,7 +752,7 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedPrematurely() {
 	t := suite.T()
-	ctx := kadtest.CtxShort(t)
+	ctx := kadtest.CtxFull(t)
 	out, err := suite.d.SearchValue(ctx, suite.key, RoutingQuorum(3))
 	require.NoError(t, err)
 
