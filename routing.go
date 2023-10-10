@@ -390,6 +390,9 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	quorum := d.getQuorum(ropt)
 
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
+		_, innerSpan := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine.QueryFunc")
+		defer innerSpan.End()
+
 		rec := resp.GetRecord()
 		if rec == nil {
 			return nil
@@ -402,11 +405,13 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		idx, _ := backend.Validate(ctx, path, best, rec.GetValue())
 		switch idx {
 		case 0: // "best" is still the best value
+			innerSpan.SetAttributes(attribute.String("better", "old"))
 			if bytes.Equal(best, rec.GetValue()) {
 				quorumPeers[id] = struct{}{}
 			}
 
 		case 1: // rec.GetValue() is better than our current "best"
+			innerSpan.SetAttributes(attribute.String("better", "new"))
 
 			// We have identified a better record. All peers that were currently
 			// in our set of quorum peers need to be updated wit this new record
@@ -422,6 +427,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 			best = rec.GetValue()
 			out <- best
 		case -1: // "best" and rec.GetValue() are both invalid
+			innerSpan.SetAttributes(attribute.String("better", "none"))
 			return nil
 
 		default:
