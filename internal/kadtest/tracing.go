@@ -47,6 +47,8 @@ func MaybeTrace(t testing.TB, ctx context.Context) (context.Context, trace.Trace
 		span.End()
 	})
 
+	otel.SetTracerProvider(tp)
+
 	return ctx, tp
 }
 

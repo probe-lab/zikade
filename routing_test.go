@@ -675,6 +675,7 @@ func TestDHT_SearchValue_quorum_test_suite(t *testing.T) {
 type SearchValueQuorumTestSuite struct {
 	suite.Suite
 
+	ctx     context.Context
 	d       *DHT
 	servers []*DHT
 
@@ -697,10 +698,17 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 
 	t := suite.T()
 	ctx := kadtest.CtxShort(t)
+
+	ctx, tp := kadtest.MaybeTrace(t, ctx)
+
+	suite.ctx = ctx
+
 	clk := clock.New()
 
 	cfg := DefaultConfig()
 	cfg.Clock = clk
+	cfg.TracerProvider = tp
+
 	top := NewTopology(t)
 
 	// init privileged DHT server
@@ -752,14 +760,17 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedPrematurely() {
 	t := suite.T()
-	ctx := kadtest.CtxShort(t)
-	out, err := suite.d.SearchValue(ctx, suite.key, RoutingQuorum(3))
-	require.NoError(t, err)
 
-	val := readItem(t, ctx, out)
-	assert.Equal(t, suite.validValue, val)
+	for i := 0; i < 100; i++ {
 
-	assertClosed(t, ctx, out)
+		out, err := suite.d.SearchValue(suite.ctx, suite.key, RoutingQuorum(3))
+		require.NoError(t, err)
+
+		val := readItem(t, suite.ctx, out)
+		assert.Equal(t, suite.validValue, val)
+
+		assertClosed(t, suite.ctx, out)
+	}
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedAfterDiscoveryOfBetter() {
