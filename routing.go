@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -399,6 +400,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		if rec == nil {
 			return nil
 		}
+		runtime.Gosched()
 
 		if !bytes.Equal(routingKey, rec.GetKey()) {
 			return nil
