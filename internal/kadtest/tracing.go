@@ -34,22 +34,23 @@ var (
 //	docker run --rm --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/all-in-one:1.49
 //
 // Then navigate to localhost:16686 and inspect the traces.
-func MaybeTrace(t testing.TB, ctx context.Context) (context.Context, trace.TracerProvider) {
+func MaybeTrace(t testing.TB, ctx context.Context) (context.Context, trace.TracerProvider, trace.Tracer) {
 	if !*tracing {
-		return ctx, otel.GetTracerProvider()
+		return ctx, otel.GetTracerProvider(), nil
 	}
 
 	tp := OtelTracerProvider(ctx, t)
 	t.Logf("Tracing enabled and exporting to %s:%d", *tracingHost, *tracingPort)
 
-	ctx, span := tp.Tracer("kadtest").Start(ctx, t.Name(), trace.WithNewRoot())
+	tracer := tp.Tracer("kadtest")
+	ctx, span := tracer.Start(ctx, t.Name(), trace.WithNewRoot())
 	t.Cleanup(func() {
 		span.End()
 	})
 
 	otel.SetTracerProvider(tp)
 
-	return ctx, tp
+	return ctx, tp, tracer
 }
 
 // OtelTracerProvider creates a tracer provider that exports traces to, e.g., a

@@ -2,7 +2,6 @@ package zikade
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -44,7 +43,7 @@ func (r *router) SendMessage(ctx context.Context, to kadt.PeerID, req *pb.Messag
 	spanOpts := []trace.SpanStartOption{
 		trace.WithAttributes(tele.AttrMessageType(req.GetType().String())),
 		trace.WithAttributes(tele.AttrPeerID(to.String())),
-		trace.WithAttributes(tele.AttrKey(base64.RawStdEncoding.EncodeToString(req.GetKey()))),
+		trace.WithAttributes(tele.AttrBinKey(req.GetKey())),
 	}
 	ctx, span := r.tele.Tracer.Start(ctx, "router.SendMessage", spanOpts...)
 	defer func() {

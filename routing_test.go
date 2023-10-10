@@ -5,6 +5,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"net/http"
+	"net/http/pprof"
+	_ "net/http/pprof"
 	"testing"
 	"time"
 
@@ -697,11 +700,14 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 	// second test assertion: with a quorum of 5 we expect to receive the valid but also better record.
 
 	t := suite.T()
+
+	// prepare test context
 	ctx := kadtest.CtxShort(t)
+	ctx, tp, tracer := kadtest.MaybeTrace(t, ctx)
+	suite.ctx = ctx // use that context in all tests
 
-	ctx, tp := kadtest.MaybeTrace(t, ctx)
-
-	suite.ctx = ctx
+	ctx, span := tracer.Start(ctx, "SetupTest")
+	defer span.End()
 
 	clk := clock.New()
 
@@ -760,14 +766,34 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedPrematurely() {
 	t := suite.T()
+	mux := http.NewServeMux()
 
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	server := &http.Server{
+		Addr:    ":8081",
+		Handler: mux,
+	}
+
+	go server.ListenAndServe()
+
+	t.Cleanup(func() { server.Close() })
+
+	fmt.Println(time.Now().Format(time.RFC3339Nano) + " Start SearchValue...")
 	out, err := suite.d.SearchValue(suite.ctx, suite.key, RoutingQuorum(3))
 	require.NoError(t, err)
 
+	fmt.Println(time.Now().Format(time.RFC3339Nano) + " Read SearchValue...")
 	val := readItem(t, suite.ctx, out)
 	assert.Equal(t, suite.validValue, val)
+	fmt.Println(time.Now().Format(time.RFC3339Nano) + " waiting for channel close...")
 
 	assertClosed(t, suite.ctx, out)
+	fmt.Println(time.Now().Format(time.RFC3339Nano) + " closed!")
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedAfterDiscoveryOfBetter() {

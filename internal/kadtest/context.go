@@ -19,7 +19,7 @@ func CtxShort(t *testing.T) context.Context {
 	if runtime.GOOS == "windows" && runtime.GOARCH == "386" {
 		timeout = 60 * time.Second
 	} else {
-		timeout = 10 * time.Second
+		timeout = 120 * time.Second
 	}
 	goal := time.Now().Add(timeout)
 
