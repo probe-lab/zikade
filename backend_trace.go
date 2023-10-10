@@ -2,6 +2,7 @@ package zikade
 
 import (
 	"context"
+	"time"
 
 	"github.com/plprobelab/zikade/tele"
 
@@ -34,6 +35,7 @@ func traceWrapBackend(namespace string, backend Backend, tracer trace.Tracer) Ba
 func (t *tracedBackend) Store(ctx context.Context, key string, value any) (any, error) {
 	ctx, span := t.tracer.Start(ctx, "Store", t.traceAttributes(key))
 	defer span.End()
+	time.Sleep(time.Millisecond)
 
 	result, err := t.backend.Store(ctx, key, value)
 	if err != nil {
@@ -49,6 +51,7 @@ func (t *tracedBackend) Store(ctx context.Context, key string, value any) (any, 
 func (t *tracedBackend) Fetch(ctx context.Context, key string) (any, error) {
 	ctx, span := t.tracer.Start(ctx, "Fetch", t.traceAttributes(key))
 	defer span.End()
+	time.Sleep(time.Millisecond)
 
 	result, err := t.backend.Fetch(ctx, key)
 	if err != nil {
