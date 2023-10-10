@@ -703,10 +703,10 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 
 	// prepare test context
 	ctx := kadtest.CtxShort(t)
-	ctx, tp, tracer := kadtest.MaybeTrace(t, ctx)
+	ctx, tp := kadtest.MaybeTrace(t, ctx)
 	suite.ctx = ctx // use that context in all tests
 
-	ctx, span := tracer.Start(ctx, "SetupTest")
+	ctx, span := tp.Tracer("kadtest").Start(ctx, "SetupTest")
 	defer span.End()
 
 	clk := clock.New()
