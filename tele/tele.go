@@ -2,6 +2,7 @@ package tele
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 
 	"go.opentelemetry.io/otel"
@@ -95,8 +96,11 @@ func AttrMessageType(val string) attribute.KeyValue {
 	return attribute.String("message_type", val)
 }
 
-func AttrKey(val string) attribute.KeyValue {
-	return attribute.String("key", val)
+// AttrBinKey base64 encodes the given key to a trace/meter attribute. This is
+// necessary as some binary keys conain invalid UTF-8 characters.
+func AttrBinKey(key []byte) attribute.KeyValue {
+	val := base64.RawStdEncoding.EncodeToString(key)
+	return attribute.String("key_b64", val)
 }
 
 // AttrInEvent creates an attribute that records the type of an event
