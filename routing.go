@@ -368,7 +368,6 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
 	defer span.End()
 	defer close(out)
-	fmt.Println(time.Now().Format(time.RFC3339Nano) + " start searchValueRoutine...")
 
 	routingKey := []byte(newRoutingKey(ns, path))
 
@@ -392,7 +391,6 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	quorum := d.getQuorum(ropt)
 
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
-		fmt.Println(time.Now().Format(time.RFC3339Nano) + " start query func")
 		_, innerSpan := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine.QueryFunc")
 		defer innerSpan.End()
 

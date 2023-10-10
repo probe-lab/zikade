@@ -783,17 +783,13 @@ func (suite *SearchValueQuorumTestSuite) TestQuorumReachedPrematurely() {
 
 	t.Cleanup(func() { server.Close() })
 
-	fmt.Println(time.Now().Format(time.RFC3339Nano) + " Start SearchValue...")
 	out, err := suite.d.SearchValue(suite.ctx, suite.key, RoutingQuorum(3))
 	require.NoError(t, err)
 
-	fmt.Println(time.Now().Format(time.RFC3339Nano) + " Read SearchValue...")
 	val := readItem(t, suite.ctx, out)
 	assert.Equal(t, suite.validValue, val)
-	fmt.Println(time.Now().Format(time.RFC3339Nano) + " waiting for channel close...")
 
 	assertClosed(t, suite.ctx, out)
-	fmt.Println(time.Now().Format(time.RFC3339Nano) + " closed!")
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedAfterDiscoveryOfBetter() {
