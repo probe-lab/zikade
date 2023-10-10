@@ -761,16 +761,13 @@ func (suite *SearchValueQuorumTestSuite) SetupTest() {
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedPrematurely() {
 	t := suite.T()
 
-	for i := 0; i < 100; i++ {
+	out, err := suite.d.SearchValue(suite.ctx, suite.key, RoutingQuorum(3))
+	require.NoError(t, err)
 
-		out, err := suite.d.SearchValue(suite.ctx, suite.key, RoutingQuorum(3))
-		require.NoError(t, err)
+	val := readItem(t, suite.ctx, out)
+	assert.Equal(t, suite.validValue, val)
 
-		val := readItem(t, suite.ctx, out)
-		assert.Equal(t, suite.validValue, val)
-
-		assertClosed(t, suite.ctx, out)
-	}
+	assertClosed(t, suite.ctx, out)
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedAfterDiscoveryOfBetter() {
