@@ -86,6 +86,10 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	_, nodes, err := nettest.LinearTopology(3, clock.New())
 	require.NoError(t, err)
 
+	// it would be better to just work with the queryBehaviour in this test.
+	// However, we want to test as many parts as possible and waitForQuery
+	// is defined on the coordinator. Therfore, we instantiate a coordinator
+	// and close it immediately to manually control state machine progression.
 	c, err := NewCoordinator(nodes[0].NodeID, nodes[0].Router, nodes[0].RoutingTable, nil)
 	require.NoError(t, err)
 	require.NoError(t, c.Close()) // close immediately so that we control the state machine progression
@@ -103,6 +107,7 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 
 	// start query
 	waiter := NewWaiter[BehaviourEvent]()
+	wrappedWaiter := NewNotifyCloserHook[BehaviourEvent](waiter)
 
 	waiterDone := make(chan struct{})
 	waiterMsg := make(chan struct{})
@@ -121,7 +126,7 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 		Target:            msg.Target(),
 		Message:           msg,
 		KnownClosestNodes: []kadt.PeerID{nodes[1].NodeID},
-		Notify:            waiter,
+		Notify:            wrappedWaiter,
 		NumResults:        0,
 	})
 
@@ -144,6 +149,15 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	ev, _ = c.queryBehaviour.Perform(ctx)
 	require.IsType(t, &EventOutboundSendMessage{}, ev)
 
+	hasLock := make(chan struct{})
+	var once sync.Once
+	wrappedWaiter.BeforeNotify = func(ctx context.Context, event BehaviourEvent) {
+		once.Do(func() {
+			require.IsType(t, &EventQueryProgressed{}, event) // verify test invariant
+			close(hasLock)
+		})
+	}
+
 	// Simulate a successful response from the new node. This node didn't return
 	// any new nodes to contact. This means the query pool behaviour will notify
 	// the waiter about a query progression and afterward about a finished
@@ -151,15 +165,17 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	// of 1, the channel cannot hold both events. At the same time, the waiter
 	// doesn't consume the messages because it's busy processing the previous
 	// query event (because we haven't released the blocking waiterMsg call above).
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		wg.Done()
-		c.queryBehaviour.Notify(ctx, successMsg(nodes[2].NodeID))
-	}()
+	go c.queryBehaviour.Notify(ctx, successMsg(nodes[2].NodeID))
 
-	wg.Wait()
-	<-waiterMsg
+	// wait until the above Notify call was handled by waiting until the hasLock
+	// channel was closed in the above BeforeNotify hook. If that hook is called
+	// we can be sure that the above Notify call has acquired the polled query
+	// behaviour's pendingMu lock.
+	kadtest.AssertClosed(t, ctx, hasLock)
+
+	// Since we know that the pooled query behaviour holds the lock we can
+	// release the slow waiter by reading an item from the waiterMsg channel.
+	kadtest.ReadItem(t, ctx, waiterMsg)
 
 	// At this point, the waitForQuery QueryFunc callback returned a
 	// coordt.ErrSkipRemaining. This instructs the waitForQuery method to notify
@@ -168,10 +184,5 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	// lock on the pending events to process. Therefore, this notify call will
 	// also block. At the same time, the waiter cannot read the new messages
 	// from the query behaviour because it tries to notify it.
-
-	select {
-	case <-waiterDone:
-	case <-ctx.Done():
-		t.Fatalf("tiemout")
-	}
+	kadtest.AssertClosed(t, ctx, waiterDone)
 }
