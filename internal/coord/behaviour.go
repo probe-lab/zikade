@@ -146,3 +146,38 @@ func (w *Waiter[E]) Close() {
 func (w *Waiter[E]) Chan() <-chan WaiterEvent[E] {
 	return w.pending
 }
+
+// NotifyCloserHook implements the [NotifyCloser] interface and provides hooks
+// into the Notify and Close calls by wrapping another [NotifyCloser]. This is
+// intended to be used in testing.
+type NotifyCloserHook[E BehaviourEvent] struct {
+	nc           NotifyCloser[E]
+	BeforeNotify func(context.Context, E)
+	AfterNotify  func(context.Context, E)
+	BeforeClose  func()
+	AfterClose   func()
+}
+
+var _ NotifyCloser[BehaviourEvent] = (*NotifyCloserHook[BehaviourEvent])(nil)
+
+func NewNotifyCloserHook[E BehaviourEvent](nc NotifyCloser[E]) *NotifyCloserHook[E] {
+	return &NotifyCloserHook[E]{
+		nc:           nc,
+		BeforeNotify: func(ctx context.Context, e E) {},
+		AfterNotify:  func(ctx context.Context, e E) {},
+		BeforeClose:  func() {},
+		AfterClose:   func() {},
+	}
+}
+
+func (n *NotifyCloserHook[E]) Notify(ctx context.Context, ev E) {
+	n.BeforeNotify(ctx, ev)
+	n.nc.Notify(ctx, ev)
+	n.AfterNotify(ctx, ev)
+}
+
+func (n *NotifyCloserHook[E]) Close() {
+	n.BeforeClose()
+	n.nc.Close()
+	n.AfterClose()
+}

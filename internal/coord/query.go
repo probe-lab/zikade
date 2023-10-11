@@ -107,16 +107,29 @@ func DefaultPooledQueryConfig() *PooledQueryConfig {
 	}
 }
 
+// PooledQueryBehaviour holds the behaviour and state for managing a pool of queries.
 type PooledQueryBehaviour struct {
-	cfg     PooledQueryConfig
-	pool    *query.Pool[kadt.Key, kadt.PeerID, *pb.Message]
+	// cfg is a copy of the optional configuration supplied to the behaviour.
+	cfg PooledQueryConfig
+
+	// pool is the query pool state machine used for managing individual queries.
+	pool *query.Pool[kadt.Key, kadt.PeerID, *pb.Message]
+
+	// waiters is a map that keeps track of event notifications for each running query.
 	waiters map[coordt.QueryID]NotifyCloser[BehaviourEvent]
 
+	// pendingMu guards access to pending
 	pendingMu sync.Mutex
-	pending   []BehaviourEvent
-	ready     chan struct{}
+
+	// pending is a queue of pending events that need to be processed.
+	pending []BehaviourEvent
+
+	// ready is a channel signaling that events are ready to be processed.
+	ready chan struct{}
 }
 
+// NewPooledQueryBehaviour initialises a new PooledQueryBehaviour, setting up the query
+// pool and other internal state.
 func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQueryBehaviour, error) {
 	if cfg == nil {
 		cfg = DefaultPooledQueryConfig()
@@ -145,6 +158,9 @@ func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQ
 	return h, err
 }
 
+// Notify receives a behaviour event and takes appropriate actions such as starting,
+// stopping, or updating queries. It also queues events for later processing and
+// triggers the advancement of the query pool if applicable.
 func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.Notify")
 	defer span.End()
@@ -259,10 +275,15 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	}
 }
 
+// Ready returns a channel that signals when the pooled query behaviour is ready to
+// perform work.
 func (p *PooledQueryBehaviour) Ready() <-chan struct{} {
 	return p.ready
 }
 
+// Perform executes the next available task from the queue of pending events or advances
+// the query pool. Returns the executed event and a boolean indicating whether work was
+// performed.
 func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.Perform")
 	defer span.End()
@@ -298,6 +319,9 @@ func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, boo
 	}
 }
 
+// advancePool advances the query pool state machine and returns an outbound event if
+// there is work to be performed. Also notifies waiters of query completion or
+// progress.
 func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (out BehaviourEvent, term bool) {
 	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.advancePool", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
