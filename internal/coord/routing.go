@@ -433,7 +433,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		cmd := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
 			KnownClosestNodes: ev.SeedNodes,
 		}
-		// attempt to advance the bootstrap
+		// attempt to advance the bootstrap state machine
 		next, ok := r.advanceBootstrap(ctx, cmd)
 		if ok {
 			r.pending = append(r.pending, next)
@@ -443,7 +443,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		cmd := &routing.EventCrawlStart[kadt.Key, kadt.PeerID]{
 			Seed: ev.Seed,
 		}
-		// attempt to advance the bootstrap
+		// attempt to advance the crawl state machine
 		next, ok := r.advanceCrawl(ctx, cmd)
 		if ok {
 			r.pending = append(r.pending, next)
@@ -454,11 +454,20 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		if r.self.Equal(ev.NodeID) {
 			break
 		}
-		// TODO: apply ttl
-		cmd := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
-			NodeID: ev.NodeID,
+
+		var cmd routing.IncludeEvent
+		if ev.Checked {
+			cmd = &routing.EventIncludeNode[kadt.Key, kadt.PeerID]{
+				NodeID: ev.NodeID,
+			}
+		} else {
+			// TODO: apply ttl
+			cmd = &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
+				NodeID: ev.NodeID,
+			}
 		}
-		// attempt to advance the include
+
+		// attempt to advance the include state machine
 		next, ok := r.advanceInclude(ctx, cmd)
 		if ok {
 			r.pending = append(r.pending, next)
@@ -549,6 +558,11 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 
 		case routing.CrawlQueryID:
+			r.pending = append(r.pending, &EventAddNode{
+				NodeID:  ev.To,
+				Checked: true,
+			})
+
 			cmd := &routing.EventCrawlNodeResponse[kadt.Key, kadt.PeerID]{
 				NodeID:      ev.To,
 				Target:      ev.Target,
@@ -642,7 +656,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			r.pending = append(r.pending, next)
 		}
 
-		// tell the probe state machine in case there is are connectivity checks that could satisfied
+		// tell the probe state machine in case there are connectivity checks that could be satisfied
 		cmdProbe := &routing.EventProbeNotifyConnectivity[kadt.Key, kadt.PeerID]{
 			NodeID: ev.NodeID,
 		}
@@ -912,7 +926,7 @@ func (r *RoutingBehaviour) advanceCrawl(ctx context.Context, ev routing.CrawlEve
 		// crawl waiting for a message response but has capacity to do more
 	case *routing.StateCrawlWaitingAtCapacity:
 		// crawl waiting for a message response but has no capacity to do more
-	case *routing.StateCrawlFinished:
+	case *routing.StateCrawlFinished[kadt.Key, kadt.PeerID]:
 		r.cfg.Logger.Info("crawl finished")
 	case *routing.StateCrawlIdle:
 		// bootstrap not running, nothing to do

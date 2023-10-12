@@ -3,9 +3,11 @@ package zikade
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	record "github.com/libp2p/go-libp2p-record"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
@@ -20,6 +22,27 @@ import (
 
 type FullRT struct {
 	*DHT
+
+	cfg *FullRTConfig
+}
+
+type FullRTConfig struct {
+	*Config
+	CrawlInterval time.Duration
+}
+
+func NewFullRT(h host.Host, cfg *FullRTConfig) (*FullRT, error) {
+	d, err := New(h, cfg.Config)
+	if err != nil {
+		return nil, fmt.Errorf("new DHT: %w", err)
+	}
+
+	frt := &FullRT{
+		DHT: d,
+		cfg: cfg,
+	}
+
+	return frt, nil
 }
 
 var _ routing.Routing = (*FullRT)(nil)

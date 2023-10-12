@@ -288,3 +288,52 @@ func TestIncludeConnectivityCheckFailure(t *testing.T) {
 	require.False(t, found)
 	require.Zero(t, foundNode)
 }
+
+func TestIncludeAddNodeSkipsCandidateQueue(t *testing.T) {
+	ctx := context.Background()
+	clk := clock.NewMock()
+	cfg := DefaultIncludeConfig()
+	cfg.Clock = clk
+	cfg.Concurrency = 1
+
+	rt, err := triert.New[tiny.Key, tiny.Node](tiny.NewNode(128), nil)
+	require.NoError(t, err)
+	p, err := NewInclude[tiny.Key, tiny.Node](rt, cfg)
+	require.NoError(t, err)
+
+	candidate1 := tiny.NewNode(0b00000100)
+	candidate2 := tiny.NewNode(0b00000110)
+
+	state := p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: candidate1,
+	})
+	require.IsType(t, &StateIncludeConnectivityCheck[tiny.Key, tiny.Node]{}, state)
+
+	state = p.Advance(ctx, &EventIncludeAddCandidate[tiny.Key, tiny.Node]{
+		NodeID: candidate2,
+	})
+	require.IsType(t, &StateIncludeWaitingAtCapacity{}, state)
+
+	state = p.Advance(ctx, &EventIncludeNode[tiny.Key, tiny.Node]{
+		NodeID: candidate2,
+	})
+	tstate, ok := state.(*StateIncludeRoutingUpdated[tiny.Key, tiny.Node])
+	require.True(t, ok, "type is %T", state)
+	require.Equal(t, tstate.NodeID, candidate2)
+
+	// there's still candidate2 in the candidates queue because we're at capacity
+	require.Len(t, p.candidates.nodes, 1)
+
+	state = p.Advance(ctx, &EventIncludeConnectivityCheckSuccess[tiny.Key, tiny.Node]{
+		NodeID: candidate1,
+	})
+	tstate, ok = state.(*StateIncludeRoutingUpdated[tiny.Key, tiny.Node])
+	require.True(t, ok, "type is %T", state)
+	require.Equal(t, tstate.NodeID, candidate1)
+
+	// there's still candidate2 in the candidates queue because we're at capacity
+	require.Len(t, p.candidates.nodes, 1)
+
+	state = p.Advance(ctx, &EventIncludePoll{})
+	require.IsType(t, &StateIncludeIdle{}, state)
+}

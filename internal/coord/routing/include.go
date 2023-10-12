@@ -222,6 +222,18 @@ func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out Incl
 		}
 		in.candidates.Enqueue(ctx, tev.NodeID)
 
+	case *EventIncludeNode[K, N]:
+		delete(in.checks, key.HexString(tev.NodeID.Key()))
+		if in.rt.AddNode(tev.NodeID) {
+			return &StateIncludeRoutingUpdated[K, N]{
+				NodeID: tev.NodeID,
+			}
+		}
+
+		// no need to remove the node from the candidate queue because we
+		// will enqueue as many nodes from the queue until we find one that
+		// is not yet included in the routing table.
+
 	case *EventIncludeConnectivityCheckSuccess[K, N]:
 		in.counterChecksPassed.Add(ctx, 1)
 		ch, ok := in.checks[key.HexString(tev.NodeID.Key())]
@@ -252,25 +264,37 @@ func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out Incl
 		return &StateIncludeWaitingAtCapacity{}
 	}
 
-	candidate, ok := in.candidates.Dequeue(ctx)
-	if !ok {
-		// No candidate in queue
-		if len(in.checks) > 0 {
-			return &StateIncludeWaitingWithCapacity{}
+	// dequeue multiple candidates and check if they are already in the routing
+	// table. If they are, we won't start a check for them. This can happen
+	// we have added them directly to the routing table via [EventIncludeNode].
+	for {
+		candidate, ok := in.candidates.Dequeue(ctx)
+		if !ok {
+			break
 		}
-		return &StateIncludeIdle{}
+
+		if _, exists := in.rt.GetNode(candidate.Key()); exists {
+			continue
+		}
+
+		in.checks[key.HexString(candidate.Key())] = check[K, N]{
+			NodeID:  candidate,
+			Started: in.cfg.Clock.Now(),
+		}
+
+		// Ask the node to find itself
+		in.counterChecksSent.Add(ctx, 1)
+		return &StateIncludeConnectivityCheck[K, N]{
+			NodeID: candidate,
+		}
 	}
 
-	in.checks[key.HexString(candidate.Key())] = check[K, N]{
-		NodeID:  candidate,
-		Started: in.cfg.Clock.Now(),
+	// No candidate in queue
+	if len(in.checks) > 0 {
+		return &StateIncludeWaitingWithCapacity{}
 	}
 
-	// Ask the node to find itself
-	in.counterChecksSent.Add(ctx, 1)
-	return &StateIncludeConnectivityCheck[K, N]{
-		NodeID: candidate,
-	}
+	return &StateIncludeIdle{}
 }
 
 // nodeQueue is a bounded queue of unique NodeIDs
@@ -304,7 +328,7 @@ func (q *nodeQueue[K, N]) Enqueue(ctx context.Context, id N) bool {
 	return true
 }
 
-// Dequeue reads an node from the queue. It returns the node and a true value
+// Dequeue reads a node from the queue. It returns the node and a true value
 // if a node was read or nil and false if no node was read.
 func (q *nodeQueue[K, N]) Dequeue(ctx context.Context) (N, bool) {
 	if len(q.nodes) == 0 {
@@ -379,6 +403,13 @@ type EventIncludeAddCandidate[K kad.Key[K], N kad.NodeID[K]] struct {
 	NodeID N // the candidate node
 }
 
+// EventIncludeNode notifies an [Include] that a node should be added to the
+// routing table straight away. This means this node will skip the candidate
+// queue and potential checks.
+type EventIncludeNode[K kad.Key[K], N kad.NodeID[K]] struct {
+	NodeID N // the node to be added
+}
+
 // EventIncludeConnectivityCheckSuccess notifies an [Include] that a requested connectivity check has received a successful response.
 type EventIncludeConnectivityCheckSuccess[K kad.Key[K], N kad.NodeID[K]] struct {
 	NodeID N // the node the message was sent to
@@ -393,5 +424,6 @@ type EventIncludeConnectivityCheckFailure[K kad.Key[K], N kad.NodeID[K]] struct 
 // includeEvent() ensures that only events accepted by an [Include] can be assigned to the [IncludeEvent] interface.
 func (*EventIncludePoll) includeEvent()                           {}
 func (*EventIncludeAddCandidate[K, N]) includeEvent()             {}
+func (*EventIncludeNode[K, N]) includeEvent()                     {}
 func (*EventIncludeConnectivityCheckSuccess[K, N]) includeEvent() {}
 func (*EventIncludeConnectivityCheckFailure[K, N]) includeEvent() {}

@@ -20,6 +20,16 @@ func TestCrawlConfig_Validate(t *testing.T) {
 		require.NoError(t, cfg.Validate())
 	})
 
+	t.Run("crawl interval must be 0 or positive", func(t *testing.T) {
+		cfg := DefaultCrawlConfig()
+		cfg.Interval = 0
+		require.NoError(t, cfg.Validate())
+
+		cfg = DefaultCrawlConfig()
+		cfg.Interval = -1
+		require.Error(t, cfg.Validate())
+	})
+
 	t.Run("tracer is not nil", func(t *testing.T) {
 		cfg := DefaultCrawlConfig()
 		cfg.Tracer = nil
@@ -83,7 +93,7 @@ func TestNewCrawl_Start(t *testing.T) {
 			Seed: []tiny.Node{self},
 		})
 		require.Nil(t, qry.info)
-		require.IsType(t, &StateCrawlFinished{}, state)
+		require.IsType(t, &StateCrawlFinished[tiny.Key, tiny.Node]{}, state)
 	})
 
 	t.Run("handles duplicate starts (does not panic)", func(t *testing.T) {
@@ -254,8 +264,9 @@ func TestCrawl_Advance(t *testing.T) {
 			continue
 		}
 
-		if _, ok = state.(*StateCrawlFinished); ok {
+		if tstate, ok := state.(*StateCrawlFinished[tiny.Key, tiny.Node]); ok {
 			require.Nil(t, qry.info)
+			require.Len(t, tstate.Nodes, 11)
 			break
 		}
 	}
@@ -307,6 +318,10 @@ func TestCrawl_Advance_unrelated_response(t *testing.T) {
 		Target:      tstate.Target,
 		CloserNodes: []tiny.Node{},
 	})
-	require.IsType(t, &StateCrawlFinished{}, state)
+	fstate, ok := state.(*StateCrawlFinished[tiny.Key, tiny.Node])
+	require.True(t, ok, "type is %T", state)
+
 	require.Nil(t, qry.info)
+	require.Len(t, fstate.Nodes, 1)
+	require.Equal(t, tstate.NodeID, fstate.Nodes[0])
 }

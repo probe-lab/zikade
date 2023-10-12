@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/plprobelab/go-libdht/kad"
 	"github.com/plprobelab/go-libdht/kad/key"
@@ -19,9 +20,10 @@ const CrawlQueryID = coordt.QueryID("crawl")
 
 // CrawlConfig specifies optional configuration for a Crawl
 type CrawlConfig struct {
-	MaxCPL      int          // the maximum CPL until we should crawl the peer
-	Concurrency int          // the maximum number of concurrent peers that we may query
-	Tracer      trace.Tracer // Tracer is the tracer that should be used to trace execution.
+	MaxCPL      int           // the maximum CPL until we should crawl the peer
+	Interval    time.Duration // the interval in which the network should be crawled (0 means no crawling)
+	Concurrency int           // the maximum number of concurrent peers that we may query
+	Tracer      trace.Tracer  // Tracer is the tracer that should be used to trace execution.
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -30,6 +32,13 @@ func (cfg *CrawlConfig) Validate() error {
 		return &errs.ConfigurationError{
 			Component: "CrawlConfig",
 			Err:       fmt.Errorf("max cpl must be greater than zero"),
+		}
+	}
+
+	if cfg.Interval < 0 {
+		return &errs.ConfigurationError{
+			Component: "CrawlConfig",
+			Err:       fmt.Errorf("crawl interval must be zero or positive"),
 		}
 	}
 
@@ -242,8 +251,20 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 		return &StateCrawlWaitingWithCapacity{}
 	}
 
+	// generate list of new nodes for the routing table
+	nodes := make([]N, len(c.info.success))
+	i := 0
+	for _, node := range c.info.success {
+		nodes[i] = node
+		i += 1
+	}
+
+	// clear info to indicate that we're idle
 	c.info = nil
-	return &StateCrawlFinished{}
+
+	return &StateCrawlFinished[K, N]{
+		Nodes: nodes,
+	}
 }
 
 func (c *Crawl[K, N]) setMapSizes(span trace.Span, prefix string) {
@@ -281,7 +302,9 @@ type CrawlState interface {
 
 type StateCrawlIdle struct{}
 
-type StateCrawlFinished struct{}
+type StateCrawlFinished[K kad.Key[K], N kad.NodeID[K]] struct {
+	Nodes []N
+}
 
 type (
 	StateCrawlWaitingAtCapacity   struct{}
@@ -294,7 +317,7 @@ type StateCrawlFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 }
 
 // crawlState() ensures that only [Crawl] states can be assigned to a CrawlState.
-func (*StateCrawlFinished) crawlState()            {}
+func (*StateCrawlFinished[K, N]) crawlState()      {}
 func (*StateCrawlFindCloser[K, N]) crawlState()    {}
 func (*StateCrawlWaitingAtCapacity) crawlState()   {}
 func (*StateCrawlWaitingWithCapacity) crawlState() {}

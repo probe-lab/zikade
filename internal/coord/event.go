@@ -117,7 +117,8 @@ func (*EventStopQuery) queryCommand()   {}
 
 // EventAddNode notifies the routing behaviour of a potential new peer.
 type EventAddNode struct {
-	NodeID kadt.PeerID
+	NodeID  kadt.PeerID
+	Checked bool // indicates whether this node has already passed a connectivity check and should be added to the routing table right away
 }
 
 func (*EventAddNode) behaviourEvent() {}
