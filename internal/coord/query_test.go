@@ -141,6 +141,11 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesNoProgress() {
 		Target:  target,
 	})
 
+	// query will process the response and notify that node 1 is non connective
+	bev, ok = b.Perform(ctx)
+	ts.Require().True(ok)
+	ts.Require().IsType(&EventNotifyNonConnectivity{}, bev)
+
 	// ensure that the waiter received query finished event
 	wev := kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
 	ts.Require().IsType(&EventQueryFinished{}, wev.Event)
@@ -184,6 +189,11 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryProgressed() {
 		Target:      target,
 		CloserNodes: ts.nodes[1].RoutingTable.NearestNodes(target, 5),
 	})
+
+	// query will process the response and ask node 1 for closer nodes
+	bev, ok = b.Perform(ctx)
+	ts.Require().True(ok)
+	ts.Require().IsType(&EventOutboundGetCloserNodes{}, bev)
 
 	// ensure that the waiter received query progressed event
 	wev := kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
@@ -229,10 +239,6 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 		CloserNodes: ts.nodes[1].RoutingTable.NearestNodes(target, 5),
 	})
 
-	// ensure that the waiter received query progressed event
-	wev := kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
-	ts.Require().IsType(&EventQueryProgressed{}, wev.Event)
-
 	// skip events until next EventOutboundGetCloserNodes is reached
 	for {
 		bev, ok = b.Perform(ctx)
@@ -244,6 +250,10 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 		}
 	}
 
+	// ensure that the waiter received query progressed event
+	wev := kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
+	ts.Require().IsType(&EventQueryProgressed{}, wev.Event)
+
 	ts.Require().True(egc.To.Equal(ts.nodes[2].NodeID))
 	// notify success but no further nodes
 	b.Notify(ctx, &EventGetCloserNodesSuccess{
@@ -251,6 +261,9 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 		To:      egc.To,
 		Target:  target,
 	})
+
+	bev, ok = b.Perform(ctx)
+	ts.Require().True(ok)
 
 	// ensure that the waiter received query progressed event
 	wev = kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
