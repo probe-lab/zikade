@@ -193,7 +193,6 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 			return &StateCrawlIdle{}
 		}
 
-		span.RecordError(tev.Error)
 		job := crawlJob[K, N]{
 			node:   tev.NodeID,
 			target: tev.Target,
@@ -203,6 +202,7 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 		if _, found := c.info.waiting[mapKey]; !found {
 			break
 		}
+		span.RecordError(tev.Error)
 
 		delete(c.info.waiting, mapKey)
 		c.info.failed[mapKey] = tev.NodeID
@@ -283,8 +283,10 @@ type StateCrawlIdle struct{}
 
 type StateCrawlFinished struct{}
 
-type StateCrawlWaitingAtCapacity struct{}
-type StateCrawlWaitingWithCapacity struct{}
+type (
+	StateCrawlWaitingAtCapacity   struct{}
+	StateCrawlWaitingWithCapacity struct{}
+)
 
 type StateCrawlFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 	Target K // the key that the query wants to find closer nodes for

@@ -63,8 +63,7 @@ func TestNewCrawl_Start(t *testing.T) {
 		require.NoError(t, err)
 
 		qry.Advance(context.Background(), &EventCrawlStart[tiny.Key, tiny.Node]{
-			QueryID: coordt.QueryID("test"),
-			Seed:    []tiny.Node{self, a, b},
+			Seed: []tiny.Node{self, a, b},
 		})
 		require.NotNil(t, qry.info)
 		require.Len(t, qry.info.todo, cfg.MaxCPL*2-1) // self is not included
@@ -81,8 +80,7 @@ func TestNewCrawl_Start(t *testing.T) {
 		require.NoError(t, err)
 
 		state := qry.Advance(context.Background(), &EventCrawlStart[tiny.Key, tiny.Node]{
-			QueryID: coordt.QueryID("test"),
-			Seed:    []tiny.Node{self},
+			Seed: []tiny.Node{self},
 		})
 		require.Nil(t, qry.info)
 		require.IsType(t, &StateCrawlFinished{}, state)
@@ -96,18 +94,15 @@ func TestNewCrawl_Start(t *testing.T) {
 
 		seed := []tiny.Node{a, b}
 		qry.Advance(context.Background(), &EventCrawlStart[tiny.Key, tiny.Node]{
-			QueryID: coordt.QueryID("test"),
-			Seed:    seed,
+			Seed: seed,
 		})
 
 		qry.Advance(context.Background(), &EventCrawlStart[tiny.Key, tiny.Node]{
-			QueryID: coordt.QueryID("test"),
-			Seed:    seed,
+			Seed: seed,
 		})
 
 		qry.Advance(context.Background(), &EventCrawlStart[tiny.Key, tiny.Node]{
-			QueryID: coordt.QueryID("another"),
-			Seed:    seed,
+			Seed: seed,
 		})
 	})
 
@@ -117,14 +112,10 @@ func TestNewCrawl_Start(t *testing.T) {
 		qry, err := NewCrawl[tiny.Key, tiny.Node](self, tiny.NodeWithCpl, cfg)
 		require.NoError(t, err)
 
-		state := qry.Advance(context.Background(), &EventCrawlNodeResponse[tiny.Key, tiny.Node]{
-			QueryID: coordt.QueryID("test"),
-		})
+		state := qry.Advance(context.Background(), &EventCrawlNodeResponse[tiny.Key, tiny.Node]{})
 		require.IsType(t, &StateCrawlIdle{}, state)
 
-		state = qry.Advance(context.Background(), &EventCrawlNodeFailure[tiny.Key, tiny.Node]{
-			QueryID: coordt.QueryID("test"),
-		})
+		state = qry.Advance(context.Background(), &EventCrawlNodeFailure[tiny.Key, tiny.Node]{})
 		require.IsType(t, &StateCrawlIdle{}, state)
 
 		state = qry.Advance(context.Background(), &EventCrawlPoll{})
@@ -148,14 +139,11 @@ func TestCrawl_Advance(t *testing.T) {
 	cfg.MaxCPL = 4
 	cfg.Concurrency = 2
 
-	queryID := coordt.QueryID("test")
-
 	qry, err := NewCrawl[tiny.Key, tiny.Node](self, tiny.NodeWithCpl, cfg)
 	require.NoError(t, err)
 
 	state := qry.Advance(context.Background(), &EventCrawlStart[tiny.Key, tiny.Node]{
-		QueryID: queryID,
-		Seed:    seed,
+		Seed: seed,
 	})
 	assert.Len(t, qry.info.todo, 2*cfg.MaxCPL-1)
 	assert.Len(t, qry.info.cpls, 2*cfg.MaxCPL)
@@ -194,7 +182,6 @@ func TestCrawl_Advance(t *testing.T) {
 	// simulate first successful response
 	pop, pending := pending[0], pending[1:]
 	state = qry.Advance(ctx, &EventCrawlNodeResponse[tiny.Key, tiny.Node]{
-		QueryID:     queryID,
 		NodeID:      pop.NodeID,
 		Target:      pop.Target,
 		CloserNodes: []tiny.Node{},
@@ -213,7 +200,6 @@ func TestCrawl_Advance(t *testing.T) {
 	// pop next successful response. This time it contains a new node!
 	pop, pending = pending[0], pending[1:]
 	state = qry.Advance(ctx, &EventCrawlNodeResponse[tiny.Key, tiny.Node]{
-		QueryID:     queryID,
 		NodeID:      pop.NodeID,
 		Target:      pop.Target,
 		CloserNodes: []tiny.Node{c},
@@ -236,10 +222,9 @@ func TestCrawl_Advance(t *testing.T) {
 	// simulate error
 	pop, pending = pending[0], pending[1:]
 	state = qry.Advance(ctx, &EventCrawlNodeFailure[tiny.Key, tiny.Node]{
-		QueryID: queryID,
-		NodeID:  pop.NodeID,
-		Target:  pop.Target,
-		Error:   fmt.Errorf("some error"),
+		NodeID: pop.NodeID,
+		Target: pop.Target,
+		Error:  fmt.Errorf("some error"),
 	})
 	tstate, ok = state.(*StateCrawlFindCloser[tiny.Key, tiny.Node])
 	require.True(t, ok)
@@ -254,7 +239,6 @@ func TestCrawl_Advance(t *testing.T) {
 	for {
 		pop, pending = pending[0], pending[1:]
 		state = qry.Advance(ctx, &EventCrawlNodeResponse[tiny.Key, tiny.Node]{
-			QueryID:     queryID,
 			NodeID:      pop.NodeID,
 			Target:      pop.Target,
 			CloserNodes: []tiny.Node{},
@@ -282,20 +266,18 @@ func TestCrawl_Advance_unrelated_response(t *testing.T) {
 
 	self := tiny.NewNode(0)
 	a := tiny.NewNode(0b10000100)
+	b := tiny.NewNode(0b10010100)
 	seed := []tiny.Node{self, a}
 
 	cfg := DefaultCrawlConfig()
 	cfg.MaxCPL = 1
 	cfg.Concurrency = 2
 
-	queryID := coordt.QueryID("test")
-
 	qry, err := NewCrawl[tiny.Key, tiny.Node](self, tiny.NodeWithCpl, cfg)
 	require.NoError(t, err)
 
 	state := qry.Advance(context.Background(), &EventCrawlStart[tiny.Key, tiny.Node]{
-		QueryID: queryID,
-		Seed:    seed,
+		Seed: seed,
 	})
 	tstate, ok := state.(*StateCrawlFindCloser[tiny.Key, tiny.Node])
 	require.True(t, ok, "type is %T", state)
@@ -305,8 +287,7 @@ func TestCrawl_Advance_unrelated_response(t *testing.T) {
 
 	// send it an unrelated response
 	state = qry.Advance(ctx, &EventCrawlNodeResponse[tiny.Key, tiny.Node]{
-		QueryID:     "another",
-		NodeID:      tstate.NodeID,
+		NodeID:      b,
 		Target:      tstate.Target,
 		CloserNodes: []tiny.Node{},
 	})
@@ -314,16 +295,14 @@ func TestCrawl_Advance_unrelated_response(t *testing.T) {
 
 	// send it an unrelated response
 	state = qry.Advance(ctx, &EventCrawlNodeFailure[tiny.Key, tiny.Node]{
-		QueryID: "another",
-		NodeID:  tstate.NodeID,
-		Target:  tstate.Target,
-		Error:   fmt.Errorf("some error"),
+		NodeID: b,
+		Target: tstate.Target,
+		Error:  fmt.Errorf("some error"),
 	})
 	require.IsType(t, &StateCrawlWaitingWithCapacity{}, state) // still waiting with capacity because the response was ignored
 
 	// send correct response
 	state = qry.Advance(ctx, &EventCrawlNodeResponse[tiny.Key, tiny.Node]{
-		QueryID:     queryID,
 		NodeID:      tstate.NodeID,
 		Target:      tstate.Target,
 		CloserNodes: []tiny.Node{},
