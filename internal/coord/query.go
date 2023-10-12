@@ -119,9 +119,9 @@ type PooledQueryBehaviour struct {
 	// it must only be accessed while performMu is held
 	pool *query.Pool[kadt.Key, kadt.PeerID, *pb.Message]
 
-	// waiters is a map that keeps track of event notifications for each running query.
+	// notifiers is a map that keeps track of event notifications for each running query.
 	// it must only be accessed while performMu is held
-	waiters map[coordt.QueryID]NotifyCloser[BehaviourEvent]
+	notifiers map[coordt.QueryID]*queryNotifier[*EventQueryFinished]
 
 	// pendingOutbound is a queue of outbound events.
 	// it must only be accessed while performMu is held
@@ -131,7 +131,7 @@ type PooledQueryBehaviour struct {
 	pendingInboundMu sync.Mutex
 
 	// pendingInbound is a queue of inbound events that are awaiting processing
-	pendingInbound []pendingEvent[BehaviourEvent]
+	pendingInbound []CtxEvent[BehaviourEvent]
 
 	// ready is a channel signaling that the behaviour has work to perform.
 	ready chan struct{}
@@ -159,10 +159,10 @@ func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQ
 	}
 
 	h := &PooledQueryBehaviour{
-		cfg:     *cfg,
-		pool:    pool,
-		waiters: make(map[coordt.QueryID]NotifyCloser[BehaviourEvent]),
-		ready:   make(chan struct{}, 1),
+		cfg:       *cfg,
+		pool:      pool,
+		notifiers: make(map[coordt.QueryID]*queryNotifier[*EventQueryFinished]),
+		ready:     make(chan struct{}, 1),
 	}
 	return h, err
 }
@@ -171,13 +171,13 @@ func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQ
 // stopping, or updating queries. It also queues events for later processing and
 // triggers the advancement of the query pool if applicable.
 func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.Notify")
-	defer span.End()
-
 	p.pendingInboundMu.Lock()
 	defer p.pendingInboundMu.Unlock()
 
-	p.pendingInbound = append(p.pendingInbound, pendingEvent[BehaviourEvent]{Ctx: ctx, Event: ev})
+	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.Notify")
+	defer span.End()
+
+	p.pendingInbound = append(p.pendingInbound, CtxEvent[BehaviourEvent]{Ctx: ctx, Event: ev})
 
 	select {
 	case p.ready <- struct{}{}:
@@ -203,13 +203,18 @@ func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, boo
 
 	defer p.updateReadyStatus()
 
-	// drain queued outbound events first.
+	// first send any pending query notifications
+	for _, w := range p.notifiers {
+		w.DrainPending()
+	}
+
+	// drain queued outbound events before starting new work.
 	ev, ok := p.nextPendingOutbound()
 	if ok {
 		return ev, true
 	}
 
-	// perform pending inbound work.
+	// perform one piece of pending inbound work.
 	ev, ok = p.perfomNextInbound(ctx)
 	if ok {
 		return ev, true
@@ -234,13 +239,13 @@ func (p *PooledQueryBehaviour) nextPendingOutbound() (BehaviourEvent, bool) {
 	return ev, true
 }
 
-func (p *PooledQueryBehaviour) nextPendingInbound() (pendingEvent[BehaviourEvent], bool) {
+func (p *PooledQueryBehaviour) nextPendingInbound() (CtxEvent[BehaviourEvent], bool) {
 	p.pendingInboundMu.Lock()
 	defer p.pendingInboundMu.Unlock()
 	if len(p.pendingInbound) == 0 {
-		return pendingEvent[BehaviourEvent]{}, false
+		return CtxEvent[BehaviourEvent]{}, false
 	}
-	var pev pendingEvent[BehaviourEvent]
+	var pev CtxEvent[BehaviourEvent]
 	pev, p.pendingInbound = p.pendingInbound[0], p.pendingInbound[1:]
 	return pev, true
 }
@@ -263,7 +268,7 @@ func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (Behaviour
 			Seed:    ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
-			p.waiters[ev.QueryID] = ev.Notify
+			p.notifiers[ev.QueryID] = &queryNotifier[*EventQueryFinished]{monitor: ev.Notify}
 		}
 	case *EventStartMessageQuery:
 		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID, *pb.Message]{
@@ -273,7 +278,7 @@ func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (Behaviour
 			Seed:    ev.KnownClosestNodes,
 		}
 		if ev.Notify != nil {
-			p.waiters[ev.QueryID] = ev.Notify
+			p.notifiers[ev.QueryID] = &queryNotifier[*EventQueryFinished]{monitor: ev.Notify}
 		}
 	case *EventStopQuery:
 		cmd = &query.EventPoolStopQuery{
@@ -281,9 +286,9 @@ func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (Behaviour
 		}
 	case *EventGetCloserNodesSuccess:
 		p.queueAddNodeEvents(ev.CloserNodes)
-		waiter, ok := p.waiters[ev.QueryID]
+		waiter, ok := p.notifiers[ev.QueryID]
 		if ok {
-			waiter.Notify(ctx, &EventQueryProgressed{
+			waiter.TryNotifyProgressed(ctx, &EventQueryProgressed{
 				NodeID:  ev.To,
 				QueryID: ev.QueryID,
 				// CloserNodes: CloserNodeIDs(ev.CloserNodes),
@@ -307,9 +312,9 @@ func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (Behaviour
 		}
 	case *EventSendMessageSuccess:
 		p.queueAddNodeEvents(ev.CloserNodes)
-		waiter, ok := p.waiters[ev.QueryID]
+		waiter, ok := p.notifiers[ev.QueryID]
 		if ok {
-			waiter.Notify(ctx, &EventQueryProgressed{
+			waiter.TryNotifyProgressed(ctx, &EventQueryProgressed{
 				NodeID:   ev.To,
 				QueryID:  ev.QueryID,
 				Response: ev.Response,
@@ -391,14 +396,14 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 	case *query.StatePoolWaitingWithCapacity:
 		// nothing to do except wait for message response or timeout
 	case *query.StatePoolQueryFinished[kadt.Key, kadt.PeerID]:
-		waiter, ok := p.waiters[st.QueryID]
+		waiter, ok := p.notifiers[st.QueryID]
 		if ok {
-			waiter.Notify(ctx, &EventQueryFinished{
+			waiter.NotifyFinished(ctx, &EventQueryFinished{
 				QueryID:      st.QueryID,
 				Stats:        st.Stats,
 				ClosestNodes: st.ClosestNodes,
 			})
-			waiter.Close()
+			delete(p.notifiers, st.QueryID)
 		}
 	case *query.StatePoolQueryTimeout:
 		// TODO
@@ -413,7 +418,6 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 
 func (p *PooledQueryBehaviour) queueAddNodeEvents(nodes []kadt.PeerID) {
 	for _, info := range nodes {
-		// TODO: do this after advancing pool
 		p.pendingOutbound = append(p.pendingOutbound, &EventAddNode{
 			NodeID: info,
 		})
@@ -424,4 +428,48 @@ func (p *PooledQueryBehaviour) queueNonConnectivityEvent(nid kadt.PeerID) {
 	p.pendingOutbound = append(p.pendingOutbound, &EventNotifyNonConnectivity{
 		NodeID: nid,
 	})
+}
+
+type queryNotifier[E TerminalQueryEvent] struct {
+	monitor  QueryMonitor[E]
+	pending  []CtxEvent[*EventQueryProgressed]
+	stopping bool
+}
+
+func (w *queryNotifier[E]) TryNotifyProgressed(ctx context.Context, ev *EventQueryProgressed) bool {
+	if w.stopping {
+		return false
+	}
+	ce := CtxEvent[*EventQueryProgressed]{Ctx: ctx, Event: ev}
+	select {
+	case w.monitor.NotifyProgressed() <- ce:
+		return true
+	default:
+		w.pending = append(w.pending, ce)
+		return false
+	}
+}
+
+// DrainPending attempts to drain as many pending progress events as possible
+func (w *queryNotifier[E]) DrainPending() {
+	for i, ce := range w.pending {
+		select {
+		case w.monitor.NotifyProgressed() <- ce:
+		default:
+			w.pending = w.pending[i:]
+			return
+		}
+	}
+}
+
+func (w *queryNotifier[E]) NotifyFinished(ctx context.Context, ev E) {
+	w.stopping = true
+	w.DrainPending()
+	close(w.monitor.NotifyProgressed())
+
+	select {
+	case w.monitor.NotifyFinished() <- CtxEvent[E]{Ctx: ctx, Event: ev}:
+	default:
+	}
+	close(w.monitor.NotifyFinished())
 }

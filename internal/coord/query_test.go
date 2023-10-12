@@ -114,7 +114,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesNoProgress() {
 	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
 	ts.Require().NoError(err)
 
-	waiter := NewWaiter[BehaviourEvent]()
+	waiter := NewQueryWaiter(5)
 	cmd := &EventStartFindCloserQuery{
 		QueryID:           "test",
 		Target:            target,
@@ -147,8 +147,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesNoProgress() {
 	ts.Require().IsType(&EventNotifyNonConnectivity{}, bev)
 
 	// ensure that the waiter received query finished event
-	wev := kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
-	ts.Require().IsType(&EventQueryFinished{}, wev.Event)
+	kadtest.ReadItem[CtxEvent[*EventQueryFinished]](t, ctx, waiter.Finished())
 }
 
 func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryProgressed() {
@@ -162,7 +161,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryProgressed() {
 	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
 	ts.Require().NoError(err)
 
-	waiter := NewWaiter[BehaviourEvent]()
+	waiter := NewQueryWaiter(5)
 	cmd := &EventStartFindCloserQuery{
 		QueryID:           "test",
 		Target:            target,
@@ -196,8 +195,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryProgressed() {
 	ts.Require().IsType(&EventOutboundGetCloserNodes{}, bev)
 
 	// ensure that the waiter received query progressed event
-	wev := kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
-	ts.Require().IsType(&EventQueryProgressed{}, wev.Event)
+	kadtest.ReadItem[CtxEvent[*EventQueryProgressed]](t, ctx, waiter.Progressed())
 }
 
 func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
@@ -211,7 +209,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
 	ts.Require().NoError(err)
 
-	waiter := NewWaiter[BehaviourEvent]()
+	waiter := NewQueryWaiter(5)
 	cmd := &EventStartFindCloserQuery{
 		QueryID:           "test",
 		Target:            target,
@@ -251,23 +249,29 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 	}
 
 	// ensure that the waiter received query progressed event
-	wev := kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
-	ts.Require().IsType(&EventQueryProgressed{}, wev.Event)
+	wev := kadtest.ReadItem[CtxEvent[*EventQueryProgressed]](t, ctx, waiter.Progressed())
+	ts.Require().True(wev.Event.NodeID.Equal(ts.nodes[1].NodeID))
 
-	ts.Require().True(egc.To.Equal(ts.nodes[2].NodeID))
-	// notify success but no further nodes
+	// notify success for last seen EventOutboundGetCloserNodes but supply no further nodes
 	b.Notify(ctx, &EventGetCloserNodesSuccess{
 		QueryID: "test",
 		To:      egc.To,
 		Target:  target,
 	})
 
-	bev, ok = b.Perform(ctx)
-	ts.Require().True(ok)
+	// skip events until behaviour runs out of work
+	for {
+		_, ok = b.Perform(ctx)
+		if !ok {
+			break
+		}
+	}
 
 	// ensure that the waiter received query progressed event
-	wev = kadtest.ReadItem[WaiterEvent[BehaviourEvent]](t, ctx, waiter.Chan())
-	ts.Require().IsType(&EventQueryProgressed{}, wev.Event)
+	kadtest.ReadItem[CtxEvent[*EventQueryProgressed]](t, ctx, waiter.Progressed())
+
+	// ensure that the waiter received query  event
+	kadtest.ReadItem[CtxEvent[*EventQueryFinished]](t, ctx, waiter.Finished())
 }
 
 func TestPooledQuery_deadlock_regression(t *testing.T) {
@@ -299,8 +303,8 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	}
 
 	// start query
-	waiter := NewWaiter[BehaviourEvent]()
-	wrappedWaiter := NewNotifyCloserHook[BehaviourEvent](waiter)
+	waiter := NewQueryWaiter(5)
+	wrappedWaiter := NewQueryMonitorHook[*EventQueryFinished](waiter)
 
 	waiterDone := make(chan struct{})
 	waiterMsg := make(chan struct{})
@@ -344,9 +348,8 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 
 	hasLock := make(chan struct{})
 	var once sync.Once
-	wrappedWaiter.BeforeNotify = func(ctx context.Context, event BehaviourEvent) {
+	wrappedWaiter.BeforeProgressed = func() {
 		once.Do(func() {
-			require.IsType(t, &EventQueryProgressed{}, event) // verify test invariant
 			close(hasLock)
 		})
 	}

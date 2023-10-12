@@ -106,17 +106,6 @@ func (b *NetworkBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 	return nil, false
 }
 
-func (b *NetworkBehaviour) getNodeHandler(ctx context.Context, id kadt.PeerID) (*NodeHandler, error) {
-	b.nodeHandlersMu.Lock()
-	nh, ok := b.nodeHandlers[id]
-	if !ok {
-		nh = NewNodeHandler(id, b.rtr, b.logger, b.tracer)
-		b.nodeHandlers[id] = nh
-	}
-	b.nodeHandlersMu.Unlock()
-	return nh, nil
-}
-
 type NodeHandler struct {
 	self   kadt.PeerID
 	rtr    coordt.Router[kadt.Key, kadt.PeerID, *pb.Message]
