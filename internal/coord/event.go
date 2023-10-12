@@ -50,6 +50,12 @@ type RoutingNotification interface {
 	routingNotification()
 }
 
+// TerminalQueryEvent is a type of [BehaviourEvent] that indicates a query has completed.
+type TerminalQueryEvent interface {
+	BehaviourEvent
+	terminalQueryEvent()
+}
+
 type EventStartBootstrap struct {
 	SeedNodes []kadt.PeerID
 }
@@ -84,7 +90,7 @@ type EventStartMessageQuery struct {
 	Target            kadt.Key
 	Message           *pb.Message
 	KnownClosestNodes []kadt.PeerID
-	Notify            NotifyCloser[BehaviourEvent]
+	Notify            QueryMonitor[*EventQueryFinished]
 	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
 }
 
@@ -95,7 +101,7 @@ type EventStartFindCloserQuery struct {
 	QueryID           coordt.QueryID
 	Target            kadt.Key
 	KnownClosestNodes []kadt.PeerID
-	Notify            NotifyCloser[BehaviourEvent]
+	Notify            QueryMonitor[*EventQueryFinished]
 	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
 }
 
@@ -186,7 +192,8 @@ type EventQueryFinished struct {
 	ClosestNodes []kadt.PeerID
 }
 
-func (*EventQueryFinished) behaviourEvent() {}
+func (*EventQueryFinished) behaviourEvent()     {}
+func (*EventQueryFinished) terminalQueryEvent() {}
 
 // EventRoutingUpdated is emitted by the coordinator when a new node has been verified and added to the routing table.
 type EventRoutingUpdated struct {

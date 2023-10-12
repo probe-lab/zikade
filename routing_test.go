@@ -289,7 +289,7 @@ func TestDHT_FindProvidersAsync_empty_routing_table(t *testing.T) {
 	c := newRandomContent(t)
 
 	out := d.FindProvidersAsync(ctx, c, 1)
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_dht_does_not_support_providers(t *testing.T) {
@@ -300,7 +300,7 @@ func TestDHT_FindProvidersAsync_dht_does_not_support_providers(t *testing.T) {
 	delete(d.backends, namespaceProviders)
 
 	out := d.FindProvidersAsync(ctx, newRandomContent(t), 1)
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_providers_stored_locally(t *testing.T) {
@@ -315,10 +315,10 @@ func TestDHT_FindProvidersAsync_providers_stored_locally(t *testing.T) {
 
 	out := d.FindProvidersAsync(ctx, c, 1)
 
-	val := readItem(t, ctx, out)
+	val := kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, provider.ID, val.ID)
 
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_returns_only_count_from_local_store(t *testing.T) {
@@ -376,10 +376,10 @@ func TestDHT_FindProvidersAsync_queries_other_peers(t *testing.T) {
 
 	out := d1.FindProvidersAsync(ctx, c, 1)
 
-	val := readItem(t, ctx, out)
+	val := kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, provider.ID, val.ID)
 
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_respects_cancelled_context_for_local_query(t *testing.T) {
@@ -493,7 +493,7 @@ func TestDHT_FindProvidersAsync_datastore_error(t *testing.T) {
 	be.datastore = dstore
 
 	out := d.FindProvidersAsync(ctx, newRandomContent(t), 0)
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
@@ -501,7 +501,7 @@ func TestDHT_FindProvidersAsync_invalid_key(t *testing.T) {
 	d := newTestDHT(t)
 
 	out := d.FindProvidersAsync(ctx, cid.Cid{}, 0)
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func TestDHT_GetValue_happy_path(t *testing.T) {
@@ -563,32 +563,6 @@ func TestDHT_GetValue_returns_not_found_error(t *testing.T) {
 	assert.Nil(t, valueChan)
 }
 
-// assertClosed triggers a test failure if the given channel was not closed but
-// carried more values or a timeout occurs (given by the context).
-func assertClosed[T any](t testing.TB, ctx context.Context, c <-chan T) {
-	t.Helper()
-
-	select {
-	case _, more := <-c:
-		assert.False(t, more)
-	case <-ctx.Done():
-		t.Fatal("timeout closing channel")
-	}
-}
-
-func readItem[T any](t testing.TB, ctx context.Context, c <-chan T) T {
-	t.Helper()
-
-	select {
-	case val, more := <-c:
-		require.True(t, more, "channel closed unexpectedly")
-		return val
-	case <-ctx.Done():
-		t.Fatal("timeout reading item")
-		return *new(T)
-	}
-}
-
 func TestDHT_SearchValue_simple(t *testing.T) {
 	// Test setup:
 	// There is just one other server that returns a valid value.
@@ -608,10 +582,10 @@ func TestDHT_SearchValue_simple(t *testing.T) {
 	valChan, err := d1.SearchValue(ctx, key)
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, valChan)
+	val := kadtest.ReadItem(t, ctx, valChan)
 	assert.Equal(t, v, val)
 
-	assertClosed(t, ctx, valChan)
+	kadtest.AssertClosed(t, ctx, valChan)
 }
 
 func TestDHT_SearchValue_returns_best_values(t *testing.T) {
@@ -657,13 +631,13 @@ func TestDHT_SearchValue_returns_best_values(t *testing.T) {
 	valChan, err := d1.SearchValue(ctx, key)
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, valChan)
+	val := kadtest.ReadItem(t, ctx, valChan)
 	assert.Equal(t, validValue, val)
 
-	val = readItem(t, ctx, valChan)
+	val = kadtest.ReadItem(t, ctx, valChan)
 	assert.Equal(t, betterValue, val)
 
-	assertClosed(t, ctx, valChan)
+	kadtest.AssertClosed(t, ctx, valChan)
 }
 
 // In order for 'go test' to run this suite, we need to create
@@ -756,10 +730,10 @@ func (suite *SearchValueQuorumTestSuite) TestQuorumReachedPrematurely() {
 	out, err := suite.d.SearchValue(ctx, suite.key, RoutingQuorum(3))
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, out)
+	val := kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, suite.validValue, val)
 
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumReachedAfterDiscoveryOfBetter() {
@@ -768,13 +742,13 @@ func (suite *SearchValueQuorumTestSuite) TestQuorumReachedAfterDiscoveryOfBetter
 	out, err := suite.d.SearchValue(ctx, suite.key, RoutingQuorum(5))
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, out)
+	val := kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, suite.validValue, val)
 
-	val = readItem(t, ctx, out)
+	val = kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, suite.betterValue, val)
 
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumZero() {
@@ -785,13 +759,13 @@ func (suite *SearchValueQuorumTestSuite) TestQuorumZero() {
 	out, err := suite.d.SearchValue(ctx, suite.key, RoutingQuorum(0))
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, out)
+	val := kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, suite.validValue, val)
 
-	val = readItem(t, ctx, out)
+	val = kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, suite.betterValue, val)
 
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func (suite *SearchValueQuorumTestSuite) TestQuorumUnspecified() {
@@ -802,13 +776,13 @@ func (suite *SearchValueQuorumTestSuite) TestQuorumUnspecified() {
 	out, err := suite.d.SearchValue(ctx, suite.key)
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, out)
+	val := kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, suite.validValue, val)
 
-	val = readItem(t, ctx, out)
+	val = kadtest.ReadItem(t, ctx, out)
 	assert.Equal(t, suite.betterValue, val)
 
-	assertClosed(t, ctx, out)
+	kadtest.AssertClosed(t, ctx, out)
 }
 
 func TestDHT_SearchValue_routing_option_returns_error(t *testing.T) {
@@ -864,7 +838,7 @@ func TestDHT_SearchValue_stops_with_cancelled_context(t *testing.T) {
 
 	valueChan, err := d1.SearchValue(cancelledCtx, "/"+namespaceIPNS+"/some-key")
 	assert.NoError(t, err)
-	assertClosed(t, ctx, valueChan)
+	kadtest.AssertClosed(t, ctx, valueChan)
 }
 
 func TestDHT_SearchValue_has_record_locally(t *testing.T) {
@@ -892,13 +866,13 @@ func TestDHT_SearchValue_has_record_locally(t *testing.T) {
 	valChan, err := d1.SearchValue(ctx, key)
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, valChan) // from local store
+	val := kadtest.ReadItem(t, ctx, valChan) // from local store
 	assert.Equal(t, validValue, val)
 
-	val = readItem(t, ctx, valChan)
+	val = kadtest.ReadItem(t, ctx, valChan)
 	assert.Equal(t, betterValue, val)
 
-	assertClosed(t, ctx, valChan)
+	kadtest.AssertClosed(t, ctx, valChan)
 }
 
 func TestDHT_SearchValue_offline(t *testing.T) {
@@ -914,10 +888,10 @@ func TestDHT_SearchValue_offline(t *testing.T) {
 	valChan, err := d.SearchValue(ctx, key, routing.Offline)
 	require.NoError(t, err)
 
-	val := readItem(t, ctx, valChan)
+	val := kadtest.ReadItem(t, ctx, valChan)
 	assert.Equal(t, v, val)
 
-	assertClosed(t, ctx, valChan)
+	kadtest.AssertClosed(t, ctx, valChan)
 }
 
 func TestDHT_SearchValue_offline_not_found_locally(t *testing.T) {

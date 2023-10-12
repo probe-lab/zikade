@@ -314,7 +314,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 		return nil, coordt.QueryStats{}, err
 	}
 
-	waiter := NewWaiter[BehaviourEvent]()
+	waiter := NewQueryWaiter(numResults)
 	queryID := c.newOperationID()
 
 	cmd := &EventStartFindCloserQuery{
@@ -362,7 +362,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 		return nil, coordt.QueryStats{}, err
 	}
 
-	waiter := NewWaiter[BehaviourEvent]()
+	waiter := NewQueryWaiter(numResults)
 	queryID := c.newOperationID()
 
 	cmd := &EventStartMessageQuery{
@@ -412,7 +412,7 @@ func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []ka
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	waiter := NewWaiter[BehaviourEvent]()
+	waiter := NewBroadcastWaiter(0) // zero capacity since waitForBroadcast ignores progress events
 	queryID := c.newOperationID()
 
 	cmd := &EventStartBroadcast{
@@ -441,19 +441,41 @@ func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []ka
 	return nil
 }
 
-func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, waiter *Waiter[BehaviourEvent], fn coordt.QueryFunc) ([]kadt.PeerID, coordt.QueryStats, error) {
+func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, waiter *QueryWaiter, fn coordt.QueryFunc) ([]kadt.PeerID, coordt.QueryStats, error) {
 	var lastStats coordt.QueryStats
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, lastStats, ctx.Err()
-		case wev, more := <-waiter.Chan():
+
+		case wev, more := <-waiter.Progressed():
 			if !more {
 				return nil, lastStats, ctx.Err()
 			}
 			ctx, ev := wev.Ctx, wev.Event
-			switch ev := ev.(type) {
-			case *EventQueryProgressed:
+			c.cfg.Logger.Debug("query made progress", "query_id", queryID, tele.LogAttrPeerID(ev.NodeID), slog.Duration("elapsed", c.cfg.Clock.Since(ev.Stats.Start)), slog.Int("requests", ev.Stats.Requests), slog.Int("failures", ev.Stats.Failure))
+			lastStats = coordt.QueryStats{
+				Start:    ev.Stats.Start,
+				Requests: ev.Stats.Requests,
+				Success:  ev.Stats.Success,
+				Failure:  ev.Stats.Failure,
+			}
+			err := fn(ctx, ev.NodeID, ev.Response, lastStats)
+			if errors.Is(err, coordt.ErrSkipRemaining) {
+				// done
+				c.cfg.Logger.Debug("query done", "query_id", queryID)
+				c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
+				return nil, lastStats, nil
+			}
+			if err != nil {
+				// user defined error that terminates the query
+				c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
+				return nil, lastStats, err
+			}
+		case wev, more := <-waiter.Finished():
+			// drain the progress notification channel
+			for pev := range waiter.Progressed() {
+				ctx, ev := pev.Ctx, pev.Event
 				c.cfg.Logger.Debug("query made progress", "query_id", queryID, tele.LogAttrPeerID(ev.NodeID), slog.Duration("elapsed", c.cfg.Clock.Since(ev.Stats.Start)), slog.Int("requests", ev.Stats.Requests), slog.Int("failures", ev.Stats.Failure))
 				lastStats = coordt.QueryStats{
 					Start:    ev.Stats.Start,
@@ -461,40 +483,24 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 					Success:  ev.Stats.Success,
 					Failure:  ev.Stats.Failure,
 				}
-				nh, err := c.networkBehaviour.getNodeHandler(ctx, ev.NodeID)
-				if err != nil {
-					// ignore unknown node
-					c.cfg.Logger.Debug("node handler not found", "query_id", queryID, tele.LogAttrError, err)
-					break
-				}
-
-				err = fn(ctx, nh.ID(), ev.Response, lastStats)
-				if errors.Is(err, coordt.ErrSkipRemaining) {
-					// done
-					c.cfg.Logger.Debug("query done", "query_id", queryID)
-					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
-					return nil, lastStats, nil
-				}
-				if err != nil {
-					// user defined error that terminates the query
-					c.queryBehaviour.Notify(ctx, &EventStopQuery{QueryID: queryID})
+				if err := fn(ctx, ev.NodeID, ev.Response, lastStats); err != nil {
 					return nil, lastStats, err
 				}
-
-			case *EventQueryFinished:
-				// query is done
-				lastStats.Exhausted = true
-				c.cfg.Logger.Debug("query ran to exhaustion", "query_id", queryID, slog.Duration("elapsed", ev.Stats.End.Sub(ev.Stats.Start)), slog.Int("requests", ev.Stats.Requests), slog.Int("failures", ev.Stats.Failure))
-				return ev.ClosestNodes, lastStats, nil
-
-			default:
-				panic(fmt.Sprintf("unexpected event: %T", ev))
 			}
+			if !more {
+				return nil, lastStats, ctx.Err()
+			}
+
+			// query is done
+			lastStats.Exhausted = true
+			c.cfg.Logger.Debug("query ran to exhaustion", "query_id", queryID, slog.Duration("elapsed", wev.Event.Stats.End.Sub(wev.Event.Stats.Start)), slog.Int("requests", wev.Event.Stats.Requests), slog.Int("failures", wev.Event.Stats.Failure))
+			return wev.Event.ClosestNodes, lastStats, nil
+
 		}
 	}
 }
 
-func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *Waiter[BehaviourEvent]) ([]kadt.PeerID, map[string]struct {
+func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWaiter) ([]kadt.PeerID, map[string]struct {
 	Node kadt.PeerID
 	Err  error
 }, error,
@@ -503,19 +509,11 @@ func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *Waiter[Behav
 		select {
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
-		case wev, more := <-waiter.Chan():
+		case wev, more := <-waiter.Finished():
 			if !more {
 				return nil, nil, ctx.Err()
 			}
-
-			switch ev := wev.Event.(type) {
-			case *EventQueryProgressed:
-			case *EventBroadcastFinished:
-				return ev.Contacted, ev.Errors, nil
-
-			default:
-				panic(fmt.Sprintf("unexpected event: %T", ev))
-			}
+			return wev.Event.Contacted, wev.Event.Errors, nil
 		}
 	}
 }
@@ -684,3 +682,35 @@ func (w *BufferedRoutingNotifier) ExpectRoutingRemoved(ctx context.Context, id k
 type nullRoutingNotifier struct{}
 
 func (nullRoutingNotifier) Notify(context.Context, RoutingNotification) {}
+
+// A QueryWaiter implements [QueryMonitor] for general queries
+type QueryWaiter struct {
+	progressed chan CtxEvent[*EventQueryProgressed]
+	finished   chan CtxEvent[*EventQueryFinished]
+}
+
+var _ QueryMonitor[*EventQueryFinished] = (*QueryWaiter)(nil)
+
+func NewQueryWaiter(n int) *QueryWaiter {
+	w := &QueryWaiter{
+		progressed: make(chan CtxEvent[*EventQueryProgressed], n),
+		finished:   make(chan CtxEvent[*EventQueryFinished], 1),
+	}
+	return w
+}
+
+func (w *QueryWaiter) Progressed() <-chan CtxEvent[*EventQueryProgressed] {
+	return w.progressed
+}
+
+func (w *QueryWaiter) Finished() <-chan CtxEvent[*EventQueryFinished] {
+	return w.finished
+}
+
+func (w *QueryWaiter) NotifyProgressed() chan<- CtxEvent[*EventQueryProgressed] {
+	return w.progressed
+}
+
+func (w *QueryWaiter) NotifyFinished() chan<- CtxEvent[*EventQueryFinished] {
+	return w.finished
+}

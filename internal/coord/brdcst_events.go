@@ -14,7 +14,7 @@ type EventStartBroadcast struct {
 	Message *pb.Message
 	Seed    []kadt.PeerID
 	Config  brdcst.Config
-	Notify  NotifyCloser[BehaviourEvent]
+	Notify  QueryMonitor[*EventBroadcastFinished]
 }
 
 func (*EventStartBroadcast) behaviourEvent() {}
@@ -31,4 +31,5 @@ type EventBroadcastFinished struct {
 	}
 }
 
-func (*EventBroadcastFinished) behaviourEvent() {}
+func (*EventBroadcastFinished) behaviourEvent()     {}
+func (*EventBroadcastFinished) terminalQueryEvent() {}
