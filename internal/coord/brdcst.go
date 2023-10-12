@@ -15,26 +15,42 @@ import (
 )
 
 type PooledBroadcastBehaviour struct {
-	pool    coordt.StateMachine[brdcst.PoolEvent, brdcst.PoolState]
-	waiters map[coordt.QueryID]NotifyCloser[BehaviourEvent]
-
-	pendingMu sync.Mutex
-	pending   []BehaviourEvent
-	ready     chan struct{}
-
 	logger *slog.Logger
 	tracer trace.Tracer
+
+	// performMu is held while Perform is executing to ensure sequential execution of work.
+	performMu sync.Mutex
+
+	// pool is the broadcast pool state machine used for managing individual broadcasts.
+	// it must only be accessed while performMu is held
+	pool coordt.StateMachine[brdcst.PoolEvent, brdcst.PoolState]
+
+	// pendingOutbound is a queue of outbound events.
+	// it must only be accessed while performMu is held
+	pendingOutbound []BehaviourEvent
+
+	// notifiers is a map that keeps track of event notifications for each running broadcast.
+	// it must only be accessed while performMu is held
+	notifiers map[coordt.QueryID]*queryNotifier[*EventBroadcastFinished]
+
+	// pendingInboundMu guards access to pendingInbound
+	pendingInboundMu sync.Mutex
+
+	// pendingInbound is a queue of inbound events that are awaiting processing
+	pendingInbound []CtxEvent[BehaviourEvent]
+
+	ready chan struct{}
 }
 
 var _ Behaviour[BehaviourEvent, BehaviourEvent] = (*PooledBroadcastBehaviour)(nil)
 
 func NewPooledBroadcastBehaviour(brdcstPool *brdcst.Pool[kadt.Key, kadt.PeerID, *pb.Message], logger *slog.Logger, tracer trace.Tracer) *PooledBroadcastBehaviour {
 	b := &PooledBroadcastBehaviour{
-		pool:    brdcstPool,
-		waiters: make(map[coordt.QueryID]NotifyCloser[BehaviourEvent]),
-		ready:   make(chan struct{}, 1),
-		logger:  logger.With("behaviour", "pooledBroadcast"),
-		tracer:  tracer,
+		pool:      brdcstPool,
+		notifiers: make(map[coordt.QueryID]*queryNotifier[*EventBroadcastFinished]),
+		ready:     make(chan struct{}, 1),
+		logger:    logger.With("behaviour", "pooledBroadcast"),
+		tracer:    tracer,
 	}
 	return b
 }
@@ -44,14 +60,108 @@ func (b *PooledBroadcastBehaviour) Ready() <-chan struct{} {
 }
 
 func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
+	b.pendingInboundMu.Lock()
+	defer b.pendingInboundMu.Unlock()
+
 	ctx, span := b.tracer.Start(ctx, "PooledBroadcastBehaviour.Notify")
 	defer span.End()
 
-	b.pendingMu.Lock()
-	defer b.pendingMu.Unlock()
+	b.pendingInbound = append(b.pendingInbound, CtxEvent[BehaviourEvent]{Ctx: ctx, Event: ev})
+
+	select {
+	case b.ready <- struct{}{}:
+	default:
+	}
+}
+
+func (b *PooledBroadcastBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
+	b.performMu.Lock()
+	defer b.performMu.Unlock()
+
+	ctx, span := b.tracer.Start(ctx, "PooledBroadcastBehaviour.Perform")
+	defer span.End()
+
+	defer b.updateReadyStatus()
+
+	// first send any pending query notifications
+	for _, w := range b.notifiers {
+		w.DrainPending()
+	}
+
+	// drain queued outbound events before starting new work.
+	ev, ok := b.nextPendingOutbound()
+	if ok {
+		return ev, true
+	}
+
+	// perform one piece of pending inbound work.
+	ev, ok = b.perfomNextInbound(ctx)
+	if ok {
+		return ev, true
+	}
+
+	// poll the broadcast pool to trigger any timeouts and other scheduled work
+	ev, ok = b.advancePool(ctx, &brdcst.EventPoolPoll{})
+	if ok {
+		return ev, true
+	}
+
+	// return any queued outbound work that may have been generated
+	return b.nextPendingOutbound()
+}
+
+func (b *PooledBroadcastBehaviour) nextPendingOutbound() (BehaviourEvent, bool) {
+	if len(b.pendingOutbound) == 0 {
+		return nil, false
+	}
+	var ev BehaviourEvent
+	ev, b.pendingOutbound = b.pendingOutbound[0], b.pendingOutbound[1:]
+	return ev, true
+}
+
+func (b *PooledBroadcastBehaviour) nextPendingInbound() (CtxEvent[BehaviourEvent], bool) {
+	b.pendingInboundMu.Lock()
+	defer b.pendingInboundMu.Unlock()
+	if len(b.pendingInbound) == 0 {
+		return CtxEvent[BehaviourEvent]{}, false
+	}
+	var pev CtxEvent[BehaviourEvent]
+	pev, b.pendingInbound = b.pendingInbound[0], b.pendingInbound[1:]
+	return pev, true
+}
+
+func (b *PooledBroadcastBehaviour) updateReadyStatus() {
+	if len(b.pendingOutbound) != 0 {
+		select {
+		case b.ready <- struct{}{}:
+		default:
+		}
+		return
+	}
+
+	b.pendingInboundMu.Lock()
+	hasPendingInbound := len(b.pendingInbound) != 0
+	b.pendingInboundMu.Unlock()
+
+	if hasPendingInbound {
+		select {
+		case b.ready <- struct{}{}:
+		default:
+		}
+		return
+	}
+}
+
+func (b *PooledBroadcastBehaviour) perfomNextInbound(ctx context.Context) (BehaviourEvent, bool) {
+	ctx, span := b.tracer.Start(ctx, "PooledBroadcastBehaviour.perfomNextInbound")
+	defer span.End()
+	pev, ok := b.nextPendingInbound()
+	if !ok {
+		return nil, false
+	}
 
 	var cmd brdcst.PoolEvent
-	switch ev := ev.(type) {
+	switch ev := pev.Event.(type) {
 	case *EventStartBroadcast:
 		cmd = &brdcst.EventPoolStartBroadcast[kadt.Key, kadt.PeerID, *pb.Message]{
 			QueryID: ev.QueryID,
@@ -61,19 +171,19 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 			Config:  ev.Config,
 		}
 		if ev.Notify != nil {
-			b.waiters[ev.QueryID] = ev.Notify
+			b.notifiers[ev.QueryID] = &queryNotifier[*EventBroadcastFinished]{monitor: ev.Notify}
 		}
 
 	case *EventGetCloserNodesSuccess:
 		for _, info := range ev.CloserNodes {
-			b.pending = append(b.pending, &EventAddNode{
+			b.pendingOutbound = append(b.pendingOutbound, &EventAddNode{
 				NodeID: info,
 			})
 		}
 
-		waiter, ok := b.waiters[ev.QueryID]
+		waiter, ok := b.notifiers[ev.QueryID]
 		if ok {
-			waiter.Notify(ctx, &EventQueryProgressed{
+			waiter.TryNotifyProgressed(ctx, &EventQueryProgressed{
 				NodeID:  ev.To,
 				QueryID: ev.QueryID,
 			})
@@ -88,7 +198,7 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 
 	case *EventGetCloserNodesFailure:
 		// queue an event that will notify the routing behaviour of a failed node
-		b.pending = append(b.pending, &EventNotifyNonConnectivity{
+		b.pendingOutbound = append(b.pendingOutbound, &EventNotifyNonConnectivity{
 			ev.To,
 		})
 
@@ -101,13 +211,13 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 
 	case *EventSendMessageSuccess:
 		for _, info := range ev.CloserNodes {
-			b.pending = append(b.pending, &EventAddNode{
+			b.pendingOutbound = append(b.pendingOutbound, &EventAddNode{
 				NodeID: info,
 			})
 		}
-		waiter, ok := b.waiters[ev.QueryID]
+		waiter, ok := b.notifiers[ev.QueryID]
 		if ok {
-			waiter.Notify(ctx, &EventQueryProgressed{
+			waiter.TryNotifyProgressed(ctx, &EventQueryProgressed{
 				NodeID:   ev.To,
 				QueryID:  ev.QueryID,
 				Response: ev.Response,
@@ -123,7 +233,7 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 
 	case *EventSendMessageFailure:
 		// queue an event that will notify the routing behaviour of a failed node
-		b.pending = append(b.pending, &EventNotifyNonConnectivity{
+		b.pendingOutbound = append(b.pendingOutbound, &EventNotifyNonConnectivity{
 			ev.To,
 		})
 
@@ -142,51 +252,7 @@ func (b *PooledBroadcastBehaviour) Notify(ctx context.Context, ev BehaviourEvent
 	}
 
 	// attempt to advance the broadcast pool
-	ev, ok := b.advancePool(ctx, cmd)
-	if ok {
-		b.pending = append(b.pending, ev)
-	}
-	if len(b.pending) > 0 {
-		select {
-		case b.ready <- struct{}{}:
-		default:
-		}
-	}
-}
-
-func (b *PooledBroadcastBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
-	ctx, span := b.tracer.Start(ctx, "PooledBroadcastBehaviour.Perform")
-	defer span.End()
-
-	// No inbound work can be done until Perform is complete
-	b.pendingMu.Lock()
-	defer b.pendingMu.Unlock()
-
-	for {
-		// drain queued events first.
-		if len(b.pending) > 0 {
-			var ev BehaviourEvent
-			ev, b.pending = b.pending[0], b.pending[1:]
-
-			if len(b.pending) > 0 {
-				select {
-				case b.ready <- struct{}{}:
-				default:
-				}
-			}
-			return ev, true
-		}
-
-		ev, ok := b.advancePool(ctx, &brdcst.EventPoolPoll{})
-		if ok {
-			return ev, true
-		}
-
-		// finally check if any pending events were accumulated in the meantime
-		if len(b.pending) == 0 {
-			return nil, false
-		}
-	}
+	return b.advancePool(ctx, cmd)
 }
 
 func (b *PooledBroadcastBehaviour) advancePool(ctx context.Context, ev brdcst.PoolEvent) (out BehaviourEvent, term bool) {
@@ -215,16 +281,48 @@ func (b *PooledBroadcastBehaviour) advancePool(ctx context.Context, ev brdcst.Po
 			Notify:  b,
 		}, true
 	case *brdcst.StatePoolBroadcastFinished[kadt.Key, kadt.PeerID]:
-		waiter, ok := b.waiters[st.QueryID]
+		waiter, ok := b.notifiers[st.QueryID]
 		if ok {
-			waiter.Notify(ctx, &EventBroadcastFinished{
+			waiter.NotifyFinished(ctx, &EventBroadcastFinished{
 				QueryID:   st.QueryID,
 				Contacted: st.Contacted,
 				Errors:    st.Errors,
 			})
-			waiter.Close()
+			delete(b.notifiers, st.QueryID)
 		}
 	}
 
 	return nil, false
+}
+
+// A BroadcastWaiter implements [QueryMonitor] for broadcasts
+type BroadcastWaiter struct {
+	progressed chan CtxEvent[*EventQueryProgressed]
+	finished   chan CtxEvent[*EventBroadcastFinished]
+}
+
+var _ QueryMonitor[*EventBroadcastFinished] = (*BroadcastWaiter)(nil)
+
+func NewBroadcastWaiter(n int) *BroadcastWaiter {
+	w := &BroadcastWaiter{
+		progressed: make(chan CtxEvent[*EventQueryProgressed], n),
+		finished:   make(chan CtxEvent[*EventBroadcastFinished], 1),
+	}
+	return w
+}
+
+func (w *BroadcastWaiter) Progressed() <-chan CtxEvent[*EventQueryProgressed] {
+	return w.progressed
+}
+
+func (w *BroadcastWaiter) Finished() <-chan CtxEvent[*EventBroadcastFinished] {
+	return w.finished
+}
+
+func (w *BroadcastWaiter) NotifyProgressed() chan<- CtxEvent[*EventQueryProgressed] {
+	return w.progressed
+}
+
+func (w *BroadcastWaiter) NotifyFinished() chan<- CtxEvent[*EventBroadcastFinished] {
+	return w.finished
 }
