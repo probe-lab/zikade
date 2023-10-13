@@ -263,19 +263,21 @@ func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (Behaviour
 	switch ev := pev.Event.(type) {
 	case *EventStartFindCloserQuery:
 		cmd = &query.EventPoolAddFindCloserQuery[kadt.Key, kadt.PeerID]{
-			QueryID: ev.QueryID,
-			Target:  ev.Target,
-			Seed:    ev.KnownClosestNodes,
+			QueryID:  ev.QueryID,
+			Target:   ev.Target,
+			Seed:     ev.Seed,
+			Strategy: ev.Strategy,
 		}
 		if ev.Notify != nil {
 			p.notifiers[ev.QueryID] = &queryNotifier[*EventQueryFinished]{monitor: ev.Notify}
 		}
 	case *EventStartMessageQuery:
 		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID, *pb.Message]{
-			QueryID: ev.QueryID,
-			Target:  ev.Target,
-			Message: ev.Message,
-			Seed:    ev.KnownClosestNodes,
+			QueryID:  ev.QueryID,
+			Target:   ev.Target,
+			Message:  ev.Message,
+			Seed:     ev.Seed,
+			Strategy: ev.Strategy,
 		}
 		if ev.Notify != nil {
 			p.notifiers[ev.QueryID] = &queryNotifier[*EventQueryFinished]{monitor: ev.Notify}

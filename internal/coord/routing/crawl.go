@@ -64,7 +64,7 @@ func (cfg *CrawlConfig) Validate() error {
 func DefaultCrawlConfig() *CrawlConfig {
 	return &CrawlConfig{
 		MaxCPL:      16,
-		Concurrency: 1,
+		Concurrency: 200,
 		Tracer:      tele.NoopTracer(),
 	}
 }

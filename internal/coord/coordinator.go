@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/plprobelab/zikade/internal/coord/query"
+
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-libdht/kad"
 	"go.opentelemetry.io/otel"
@@ -290,6 +292,18 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 	return c.rt.NearestNodes(k, n), nil
 }
 
+type QueryConfig struct {
+	NumResults int
+	Strategy   query.QueryStrategy
+}
+
+func DefaultQueryConfig() *QueryConfig {
+	return &QueryConfig{
+		NumResults: 20,
+		Strategy:   &query.QueryStrategyConverge{},
+	}
+}
+
 // QueryClosest starts a query that attempts to find the closest nodes to the target key.
 // It returns the closest nodes found to the target key and statistics on the actions of the query.
 //
@@ -301,15 +315,20 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 // numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
 // The query is considered to be exhausted when it has received responses from at least this number of nodes
 // and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
-func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
+func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coordt.QueryFunc, cfg *QueryConfig) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
 	c.cfg.Logger.Debug("starting query for closest nodes", tele.LogAttrKey(target))
 
+	if cfg == nil {
+		cfg = DefaultQueryConfig()
+	}
+	// TODO: validate config
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seedIDs, err := c.GetClosestNodes(ctx, target, 20)
+	seedIDs, err := c.GetClosestNodes(ctx, target, cfg.NumResults)
 	if err != nil {
 		return nil, coordt.QueryStats{}, err
 	}
@@ -318,11 +337,12 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 	queryID := c.newOperationID()
 
 	cmd := &EventStartFindCloserQuery{
-		QueryID:           queryID,
-		Target:            target,
-		KnownClosestNodes: seedIDs,
-		Notify:            waiter,
-		NumResults:        numResults,
+		QueryID:    queryID,
+		Target:     target,
+		Seed:       seedIDs,
+		Notify:     waiter,
+		NumResults: cfg.NumResults,
+		Strategy:   cfg.Strategy,
 	}
 
 	// queue the start of the query
@@ -342,7 +362,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 // numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
 // The query is considered to be exhausted when it has received responses from at least this number of nodes
 // and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
-func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
+func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, cfg *QueryConfig) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
 	defer span.End()
 	if msg == nil {
@@ -353,11 +373,12 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if numResults < 1 {
-		numResults = 20 // TODO: parameterize
+	if cfg == nil {
+		cfg = DefaultQueryConfig()
 	}
+	// TODO: validate config
 
-	seedIDs, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
+	seedIDs, err := c.GetClosestNodes(ctx, msg.Target(), cfg.NumResults)
 	if err != nil {
 		return nil, coordt.QueryStats{}, err
 	}
@@ -366,12 +387,13 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	queryID := c.newOperationID()
 
 	cmd := &EventStartMessageQuery{
-		QueryID:           queryID,
-		Target:            msg.Target(),
-		Message:           msg,
-		KnownClosestNodes: seedIDs,
-		Notify:            waiter,
-		NumResults:        numResults,
+		QueryID:    queryID,
+		Target:     msg.Target(),
+		Message:    msg,
+		Seed:       seedIDs,
+		Notify:     waiter,
+		NumResults: cfg.NumResults,
+		Strategy:   cfg.Strategy,
 	}
 
 	// queue the start of the query
@@ -546,6 +568,18 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []kadt.PeerID) error 
 
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		SeedNodes: seeds,
+	})
+
+	return nil
+}
+
+// Crawl instructs the dht to begin a full network crawl
+func (c *Coordinator) Crawl(ctx context.Context, seeds []kadt.PeerID) error {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Crawl")
+	defer span.End()
+
+	c.routingBehaviour.Notify(ctx, &EventStartCrawl{
+		Seed: seeds,
 	})
 
 	return nil

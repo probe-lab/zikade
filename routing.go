@@ -15,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"github.com/plprobelab/zikade/internal/coord"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
@@ -52,7 +53,10 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 		return nil
 	}
 
-	_, _, err := d.kad.QueryClosest(ctx, kadt.PeerID(id).Key(), fn, 20)
+	qcfg := coord.DefaultQueryConfig()
+	qcfg.NumResults = d.cfg.BucketSize
+
+	_, _, err := d.kad.QueryClosest(ctx, kadt.PeerID(id).Key(), fn, qcfg)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
@@ -203,7 +207,10 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return nil
 	}
 
-	_, _, err = d.kad.QueryMessage(ctx, msg, fn, d.cfg.BucketSize)
+	qcfg := coord.DefaultQueryConfig()
+	qcfg.NumResults = d.cfg.BucketSize
+
+	_, _, err = d.kad.QueryMessage(ctx, msg, fn, qcfg)
 	if err != nil {
 		span.RecordError(err)
 		d.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))
@@ -436,7 +443,10 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		return nil
 	}
 
-	_, _, err := d.kad.QueryMessage(ctx, req, fn, d.cfg.BucketSize)
+	qcfg := coord.DefaultQueryConfig()
+	qcfg.NumResults = d.cfg.BucketSize
+
+	_, _, err := d.kad.QueryMessage(ctx, req, fn, qcfg)
 	if err != nil {
 		d.warnErr(err, "Search value query failed")
 		return

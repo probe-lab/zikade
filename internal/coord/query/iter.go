@@ -97,3 +97,52 @@ func (iter *SequentialIter[K, N]) Each(ctx context.Context, fn func(context.Cont
 	}
 	return false
 }
+
+// StaticIter iterates through the give nodes but does not add any new nodes
+// to the list. It implements the [NodeIter] interface but does not allow any
+// new nodes to be added to the list. It is static in that sense.
+type StaticIter[K kad.Key[K], N kad.NodeID[K]] struct {
+	// nodes holds the static set of nodes we want to iterate through
+	nodes []*NodeStatus[K, N]
+}
+
+// NewStaticIter takes the sole list of nodes that this iterator will loop over.
+func NewStaticIter[K kad.Key[K], N kad.NodeID[K]](nodes []N) *StaticIter[K, N] {
+	ns := make([]*NodeStatus[K, N], len(nodes))
+	for i, node := range nodes {
+		ns[i] = &NodeStatus[K, N]{
+			NodeID: node,
+			State:  &StateNodeNotContacted{},
+		}
+	}
+
+	return &StaticIter[K, N]{
+		nodes: ns,
+	}
+}
+
+func (iter *StaticIter[K, N]) Add(ni *NodeStatus[K, N]) {
+	// no-op
+}
+
+// Find returns the node information corresponding to the given Kademlia key.
+// It uses a linear search which makes it unsuitable for large numbers of
+// entries.
+func (iter *StaticIter[K, N]) Find(k K) (*NodeStatus[K, N], bool) {
+	for i := range iter.nodes {
+		if key.Equal(k, iter.nodes[i].NodeID.Key()) {
+			return iter.nodes[i], true
+		}
+	}
+
+	return nil, false
+}
+
+func (iter *StaticIter[K, N]) Each(ctx context.Context, fn func(context.Context, *NodeStatus[K, N]) bool) bool {
+	for _, ns := range iter.nodes {
+		if fn(ctx, ns) {
+			return true
+		}
+	}
+	return false
+}

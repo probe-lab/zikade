@@ -91,7 +91,8 @@ type EventStartMessageQuery struct {
 	Message           *pb.Message
 	KnownClosestNodes []kadt.PeerID
 	Notify            QueryMonitor[*EventQueryFinished]
-	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
+	NumResults        int                 // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy          query.QueryStrategy // the way the query should be performed - [query.QueryStrategyConverge] will be used by default.
 }
 
 func (*EventStartMessageQuery) behaviourEvent() {}
@@ -102,7 +103,8 @@ type EventStartFindCloserQuery struct {
 	Target            kadt.Key
 	KnownClosestNodes []kadt.PeerID
 	Notify            QueryMonitor[*EventQueryFinished]
-	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
+	NumResults        int                 // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy          query.QueryStrategy // the way the query should be performed - [query.QueryStrategyConverge] will be used by default.
 }
 
 func (*EventStartFindCloserQuery) behaviourEvent() {}

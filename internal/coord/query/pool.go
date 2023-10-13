@@ -122,9 +122,9 @@ func (p *Pool[K, N, M]) Advance(ctx context.Context, ev PoolEvent) PoolState {
 
 	switch tev := ev.(type) {
 	case *EventPoolAddFindCloserQuery[K, N]:
-		p.addFindCloserQuery(ctx, tev.QueryID, tev.Target, tev.Seed, tev.NumResults)
+		p.addFindCloserQuery(ctx, tev)
 	case *EventPoolAddQuery[K, N, M]:
-		p.addQuery(ctx, tev.QueryID, tev.Target, tev.Message, tev.Seed, tev.NumResults)
+		p.addQuery(ctx, tev)
 		// TODO: return error as state
 	case *EventPoolStopQuery:
 		if qry, ok := p.queryIndex[tev.QueryID]; ok {
@@ -258,55 +258,73 @@ func (p *Pool[K, N, M]) removeQuery(queryID coordt.QueryID) {
 
 // addQuery adds a query to the pool, returning the new query id
 // TODO: remove target argument and use msg.Target
-func (p *Pool[K, N, M]) addQuery(ctx context.Context, queryID coordt.QueryID, target K, msg M, knownClosestNodes []N, numResults int) error {
-	if _, exists := p.queryIndex[queryID]; exists {
+func (p *Pool[K, N, M]) addQuery(ctx context.Context, evt *EventPoolAddQuery[K, N, M]) error {
+	if _, exists := p.queryIndex[evt.QueryID]; exists {
 		return fmt.Errorf("query id already in use")
 	}
-	iter := NewClosestNodesIter[K, N](target)
+
+	var iter NodeIter[K, N]
+	switch evt.Strategy.(type) {
+	case *QueryStrategyConverge:
+		iter = NewClosestNodesIter[K, N](evt.Target)
+	case *QueryStrategyStatic:
+		iter = NewStaticIter[K, N](evt.Seed)
+	default:
+		iter = NewClosestNodesIter[K, N](evt.Target) // default if unset
+	}
 
 	qryCfg := DefaultQueryConfig()
 	qryCfg.Clock = p.cfg.Clock
 	qryCfg.Concurrency = p.cfg.QueryConcurrency
 	qryCfg.RequestTimeout = p.cfg.RequestTimeout
 
-	if numResults > 0 {
-		qryCfg.NumResults = numResults
+	if evt.NumResults > 0 {
+		qryCfg.NumResults = evt.NumResults
 	}
 
-	qry, err := NewQuery[K, N, M](p.self, queryID, target, msg, iter, knownClosestNodes, qryCfg)
+	qry, err := NewQuery[K, N, M](p.self, evt.QueryID, evt.Target, evt.Message, iter, evt.Seed, qryCfg)
 	if err != nil {
 		return fmt.Errorf("new query: %w", err)
 	}
 
 	p.queries = append(p.queries, qry)
-	p.queryIndex[queryID] = qry
+	p.queryIndex[evt.QueryID] = qry
 
 	return nil
 }
 
-// addQuery adds a find closer query to the pool, returning the new query id
-func (p *Pool[K, N, M]) addFindCloserQuery(ctx context.Context, queryID coordt.QueryID, target K, knownClosestNodes []N, numResults int) error {
-	if _, exists := p.queryIndex[queryID]; exists {
+// addFindCloserQuery adds a find closer query to the pool, returning the new query id
+func (p *Pool[K, N, M]) addFindCloserQuery(ctx context.Context, evt *EventPoolAddFindCloserQuery[K, N]) error {
+	if _, exists := p.queryIndex[evt.QueryID]; exists {
 		return fmt.Errorf("query id already in use")
 	}
-	iter := NewClosestNodesIter[K, N](target)
+
+	var iter NodeIter[K, N]
+	switch evt.Strategy.(type) {
+	case *QueryStrategyConverge:
+		iter = NewClosestNodesIter[K, N](evt.Target)
+	case *QueryStrategyStatic:
+		iter = NewStaticIter[K, N](evt.Seed)
+	default:
+		iter = NewClosestNodesIter[K, N](evt.Target) // default if unset
+	}
 
 	qryCfg := DefaultQueryConfig()
 	qryCfg.Clock = p.cfg.Clock
 	qryCfg.Concurrency = p.cfg.QueryConcurrency
 	qryCfg.RequestTimeout = p.cfg.RequestTimeout
 
-	if numResults > 0 {
-		qryCfg.NumResults = numResults
+	if evt.NumResults > 0 {
+		qryCfg.NumResults = evt.NumResults
 	}
 
-	qry, err := NewFindCloserQuery[K, N, M](p.self, queryID, target, iter, knownClosestNodes, qryCfg)
+	qry, err := NewFindCloserQuery[K, N, M](p.self, evt.QueryID, evt.Target, iter, evt.Seed, qryCfg)
 	if err != nil {
 		return fmt.Errorf("new query: %w", err)
 	}
 
 	p.queries = append(p.queries, qry)
-	p.queryIndex[queryID] = qry
+	p.queryIndex[evt.QueryID] = qry
 
 	return nil
 }
@@ -377,6 +395,7 @@ type EventPoolAddFindCloserQuery[K kad.Key[K], N kad.NodeID[K]] struct {
 	Target     K              // the target key for the query
 	Seed       []N            // an initial set of close nodes the query should use
 	NumResults int            // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy   QueryStrategy  // the way the query should be performed - [QueryStrategyConverge] will be used by default.
 }
 
 // EventPoolAddQuery is an event that attempts to add a new query that sends a message.
@@ -386,6 +405,7 @@ type EventPoolAddQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	Message    M              // message to be sent to each node
 	Seed       []N            // an initial set of close nodes the query should use
 	NumResults int            // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy   QueryStrategy  // the way the query should be performed - [QueryStrategyConverge] will be used by default.
 }
 
 // EventPoolStopQuery notifies a [Pool] to stop a query.

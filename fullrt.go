@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/multiformats/go-multiaddr"
+
+	"github.com/plprobelab/zikade/internal/coord"
+	"github.com/plprobelab/zikade/internal/coord/query"
+
 	"github.com/ipfs/go-cid"
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -29,6 +34,15 @@ type FullRT struct {
 type FullRTConfig struct {
 	*Config
 	CrawlInterval time.Duration
+	QuorumFrac    float64
+}
+
+func DefaultFullRTConfig() *FullRTConfig {
+	return &FullRTConfig{
+		Config:        DefaultConfig(),
+		CrawlInterval: time.Hour, // MAGIC
+		QuorumFrac:    0.25,      // MAGIC
+	}
 }
 
 func NewFullRT(h host.Host, cfg *FullRTConfig) (*FullRT, error) {
@@ -47,16 +61,16 @@ func NewFullRT(h host.Host, cfg *FullRTConfig) (*FullRT, error) {
 
 var _ routing.Routing = (*FullRT)(nil)
 
-func (f *FullRT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
+func (f *FullRT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error) {
 	ctx, span := f.tele.Tracer.Start(ctx, "DHT.FindPeer")
 	defer span.End()
 
 	// First check locally. If we are or were recently connected to the peer,
 	// return the addresses from our peerstore unless the information doesn't
 	// contain any.
-	switch f.host.Network().Connectedness(id) {
+	switch f.host.Network().Connectedness(pid) {
 	case network.Connected, network.CanConnect:
-		addrInfo := f.host.Peerstore().PeerInfo(id)
+		addrInfo := f.host.Peerstore().PeerInfo(pid)
 		if addrInfo.ID != "" && len(addrInfo.Addrs) > 0 {
 			return addrInfo, nil
 		}
@@ -64,25 +78,59 @@ func (f *FullRT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error
 		// we're not connected or were recently connected
 	}
 
-	var foundPeer peer.ID
+	maddrsMap := make(map[multiaddr.Multiaddr]struct{})
+	quorum := int(float64(20) * f.cfg.QuorumFrac) // TODO: does not need to be 20 (can be less if routing table isn't full) - generally parameterize
 	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
-		if peer.ID(visited) == id {
-			foundPeer = peer.ID(visited)
+		for _, addrInfo := range msg.CloserPeersAddrInfos() {
+			if addrInfo.ID != pid {
+				continue
+			}
+
+			for _, maddr := range addrInfo.Addrs {
+				maddrsMap[maddr] = struct{}{}
+			}
+		}
+
+		quorum -= 1
+		if quorum == 0 {
 			return coordt.ErrSkipRemaining
 		}
+
 		return nil
 	}
 
-	_, _, err := f.kad.QueryClosest(ctx, kadt.PeerID(id).Key(), fn, 20)
+	_, _, err := f.kad.QueryClosest(ctx, kadt.PeerID(pid).Key(), fn, f.queryConfig())
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
 
-	if foundPeer == "" {
-		return peer.AddrInfo{}, fmt.Errorf("peer record not found")
+	if len(maddrsMap) == 0 {
+		return peer.AddrInfo{}, routing.ErrNotFound
 	}
 
-	return f.host.Peerstore().PeerInfo(foundPeer), nil
+	maddrs := make([]multiaddr.Multiaddr, 0, len(maddrsMap))
+	for maddr := range maddrsMap {
+		maddrs = append(maddrs, maddr)
+	}
+
+	connCtx, cancel := context.WithTimeout(ctx, 5*time.Second) // TODO: put timeout in config
+	defer cancel()
+	_ = f.host.Connect(connCtx, peer.AddrInfo{
+		ID:    pid,
+		Addrs: maddrs,
+	})
+
+	switch f.host.Network().Connectedness(pid) {
+	case network.Connected, network.CanConnect:
+		addrInfo := f.host.Peerstore().PeerInfo(pid)
+		if addrInfo.ID != "" && len(addrInfo.Addrs) > 0 {
+			return addrInfo, nil
+		}
+	default:
+		// we're not connected or were recently connected
+	}
+
+	return peer.AddrInfo{}, routing.ErrNotFound
 }
 
 func (f *FullRT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
@@ -126,8 +174,13 @@ func (f *FullRT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 		},
 	}
 
+	seed, err := f.kad.GetClosestNodes(ctx, msg.Target(), f.cfg.BucketSize)
+	if err != nil {
+		return fmt.Errorf("get closest nodes from routing table: %w", err)
+	}
+
 	// finally, find the closest peers to the target key.
-	return f.kad.BroadcastRecord(ctx, msg)
+	return f.kad.BroadcastStatic(ctx, msg, seed)
 }
 
 // PutValue satisfies the [routing.Routing] interface and will add the given
@@ -175,8 +228,8 @@ func (f *FullRT) PutValue(ctx context.Context, keyStr string, value []byte, opts
 func (f *FullRT) Bootstrap(ctx context.Context) error {
 	ctx, span := f.tele.Tracer.Start(ctx, "DHT.Bootstrap")
 	defer span.End()
-	f.log.Info("Starting bootstrap")
 
+	f.log.Info("Starting crawl bootstrap")
 	seed := make([]kadt.PeerID, len(f.cfg.BootstrapPeers))
 	for i, addrInfo := range f.cfg.BootstrapPeers {
 		seed[i] = kadt.PeerID(addrInfo.ID)
@@ -186,5 +239,12 @@ func (f *FullRT) Bootstrap(ctx context.Context) error {
 		f.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
 	}
 
-	return f.kad.Bootstrap(ctx, seed)
+	return f.kad.Crawl(ctx, seed)
+}
+
+func (f *FullRT) queryConfig() *coord.QueryConfig {
+	cfg := coord.DefaultQueryConfig()
+	cfg.NumResults = f.cfg.BucketSize
+	cfg.Strategy = &query.QueryStrategyStatic{}
+	return cfg
 }

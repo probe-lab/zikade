@@ -50,7 +50,7 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestExhaustiveQuery(t *testing.T) {
-	ctx := kadtest.CtxShort(t)
+	ctx := context.Background()
 
 	clk := clock.NewMock()
 	_, nodes, err := nettest.LinearTopology(4, clk)
@@ -77,7 +77,7 @@ func TestExhaustiveQuery(t *testing.T) {
 	}
 
 	// Run a query to find the value
-	_, _, err = c.QueryClosest(ctx, target, qfn, 20)
+	_, _, err = c.QueryClosest(ctx, target, qfn, DefaultQueryConfig())
 	require.NoError(t, err)
 
 	require.Equal(t, 3, len(visited))
@@ -115,7 +115,7 @@ func TestRoutingUpdatedEventEmittedForCloserNodes(t *testing.T) {
 
 	// Run a query to find the value
 	target := nodes[3].NodeID.Key()
-	_, _, err = c.QueryClosest(ctx, target, qfn, 20)
+	_, _, err = c.QueryClosest(ctx, target, qfn, DefaultQueryConfig())
 	require.NoError(t, err)
 
 	// the query run by the dht should have received a response from nodes[1] with closer nodes
