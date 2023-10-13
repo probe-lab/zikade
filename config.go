@@ -394,6 +394,10 @@ type QueryConfig struct {
 	// we have observed in the network during the SearchValue/GetValue
 	// operation. A DefaultQuorum of 0 means that we search the network until
 	// we have exhausted the keyspace.
+	//
+	// If you are using the FullRT implementation and keep this value at 0, then
+	// the DefaultQuorum will be overwritten to be:
+	// [Config.BucketSize] * [FullRTConfig.QuorumFrac].
 	DefaultQuorum int
 }
 

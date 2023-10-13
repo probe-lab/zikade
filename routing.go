@@ -27,26 +27,21 @@ import (
 
 var _ routing.Routing = (*DHT)(nil)
 
-func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
+func (d *DHT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error) {
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.FindPeer")
 	defer span.End()
 
 	// First check locally. If we are or were recently connected to the peer,
 	// return the addresses from our peerstore unless the information doesn't
 	// contain any.
-	switch d.host.Network().Connectedness(id) {
-	case network.Connected, network.CanConnect:
-		addrInfo := d.host.Peerstore().PeerInfo(id)
-		if addrInfo.ID != "" && len(addrInfo.Addrs) > 0 {
-			return addrInfo, nil
-		}
-	default:
-		// we're not connected or were recently connected
+	addrInfo, err := d.getRecentAddrInfo(pid)
+	if err == nil {
+		return addrInfo, nil
 	}
 
 	var foundPeer peer.ID
 	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
-		if peer.ID(visited) == id {
+		if peer.ID(visited) == pid {
 			foundPeer = peer.ID(visited)
 			return coordt.ErrSkipRemaining
 		}
@@ -56,7 +51,7 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 	qcfg := coord.DefaultQueryConfig()
 	qcfg.NumResults = d.cfg.BucketSize
 
-	_, _, err := d.kad.QueryClosest(ctx, kadt.PeerID(id).Key(), fn, qcfg)
+	_, _, err = d.kad.QueryClosest(ctx, kadt.PeerID(pid).Key(), fn, qcfg)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
@@ -66,6 +61,21 @@ func (d *DHT) FindPeer(ctx context.Context, id peer.ID) (peer.AddrInfo, error) {
 	}
 
 	return d.host.Peerstore().PeerInfo(foundPeer), nil
+}
+
+// getRecentAddrInfo returns the peer's address information if we are or were
+// recently connected to it.
+func (d *DHT) getRecentAddrInfo(pid peer.ID) (peer.AddrInfo, error) {
+	switch d.host.Network().Connectedness(pid) {
+	case network.Connected, network.CanConnect:
+		addrInfo := d.host.Peerstore().PeerInfo(pid)
+		if addrInfo.ID != "" && len(addrInfo.Addrs) > 0 {
+			return addrInfo, nil
+		}
+	default:
+		// we're not connected or were recently connected
+	}
+	return peer.AddrInfo{}, routing.ErrNotFound
 }
 
 func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
@@ -291,20 +301,27 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
 	defer span.End()
 
+	// start searching for value
 	valueChan, err := d.SearchValue(ctx, key, opts...)
 	if err != nil {
 		return nil, err
 	}
 
+	// valueChan will always emit "better" values than previous ones
+	// therefore, store the latest best value until the channel was closed
 	var best []byte
 	for val := range valueChan {
 		best = val
 	}
 
+	// if the channel was closed because the context was cancelled, return
+	// the best known value and the context error.
 	if ctx.Err() != nil {
 		return best, ctx.Err()
 	}
 
+	// if the query terminated without having found a value,
+	// return a not found error
 	if best == nil {
 		return nil, routing.ErrNotFound
 	}
