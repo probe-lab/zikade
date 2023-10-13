@@ -467,9 +467,10 @@ func (w *queryNotifier[E]) NotifyFinished(ctx context.Context, ev E) {
 	w.DrainPending()
 	close(w.monitor.NotifyProgressed())
 
+	finishedChan := w.monitor.NotifyFinished()
 	select {
-	case w.monitor.NotifyFinished() <- CtxEvent[E]{Ctx: ctx, Event: ev}:
+	case finishedChan <- CtxEvent[E]{Ctx: ctx, Event: ev}:
 	default:
 	}
-	close(w.monitor.NotifyFinished())
+	close(finishedChan)
 }

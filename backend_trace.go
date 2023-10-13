@@ -3,6 +3,7 @@ package zikade
 import (
 	"context"
 
+	"github.com/plprobelab/zikade/tele"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -74,5 +75,5 @@ func (t *tracedBackend) Validate(ctx context.Context, key string, values ...any)
 
 // traceAttributes is a helper to build the trace attributes.
 func (t *tracedBackend) traceAttributes(key string) trace.SpanStartEventOption {
-	return trace.WithAttributes(attribute.String("namespace", t.namespace), attribute.String("key", key))
+	return trace.WithAttributes(attribute.String("namespace", t.namespace), tele.AttrBinKey([]byte(key)))
 }

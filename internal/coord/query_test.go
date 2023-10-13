@@ -2,18 +2,17 @@ package coord
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/benbjohnson/clock"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-
 	"github.com/plprobelab/zikade/internal/coord/coordt"
 	"github.com/plprobelab/zikade/internal/kadtest"
 	"github.com/plprobelab/zikade/internal/nettest"
 	"github.com/plprobelab/zikade/kadt"
 	"github.com/plprobelab/zikade/pb"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPooledQueryConfigValidate(t *testing.T) {
@@ -275,7 +274,6 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 }
 
 func TestPooledQuery_deadlock_regression(t *testing.T) {
-	t.Skip()
 	ctx := kadtest.CtxShort(t)
 	msg := &pb.Message{}
 	queryID := coordt.QueryID("test")
@@ -342,16 +340,13 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	// Advance the query pool state machine. Because we returned a new node
 	// above, the query pool state machine wants to send another outbound query
 	ev, _ = c.queryBehaviour.Perform(ctx)
-	require.IsType(t, &EventAddNode{}, ev) // event to notify the routing table
-	ev, _ = c.queryBehaviour.Perform(ctx)
 	require.IsType(t, &EventOutboundSendMessage{}, ev)
+	ev, _ = c.queryBehaviour.Perform(ctx)
+	require.IsType(t, &EventAddNode{}, ev) // event to notify the routing table
 
 	hasLock := make(chan struct{})
-	var once sync.Once
-	wrappedWaiter.BeforeProgressed = func() {
-		once.Do(func() {
-			close(hasLock)
-		})
+	wrappedWaiter.BeforeFinished = func() {
+		close(hasLock)
 	}
 
 	// Simulate a successful response from the new node. This node didn't return
@@ -361,7 +356,11 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	// of 1, the channel cannot hold both events. At the same time, the waiter
 	// doesn't consume the messages because it's busy processing the previous
 	// query event (because we haven't released the blocking waiterMsg call above).
-	go c.queryBehaviour.Notify(ctx, successMsg(nodes[2].NodeID))
+	c.queryBehaviour.Notify(ctx, successMsg(nodes[2].NodeID))
+
+	ev, ok := c.queryBehaviour.Perform(ctx)
+	require.Nil(t, ev)
+	require.False(t, ok)
 
 	// wait until the above Notify call was handled by waiting until the hasLock
 	// channel was closed in the above BeforeNotify hook. If that hook is called

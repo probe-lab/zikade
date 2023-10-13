@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/plprobelab/zikade/internal/kadtest"
+	kadtest "github.com/plprobelab/zikade/internal/kadtest"
 	"github.com/plprobelab/zikade/kadt"
 )
 

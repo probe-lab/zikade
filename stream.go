@@ -120,7 +120,7 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 
 		ctx = tele.WithAttributes(ctx,
 			tele.AttrMessageType(req.GetType().String()),
-			tele.AttrKey(base64.StdEncoding.EncodeToString(req.GetKey())),
+			tele.AttrBinKey(req.GetKey()),
 		)
 
 		// extend metrics context and slogger with message information.
@@ -128,7 +128,7 @@ func (d *DHT) handleNewStream(ctx context.Context, s network.Stream) error {
 		// would already exist and tag.New would return an error.
 		slogger = slogger.With(
 			slog.String("type", req.GetType().String()),
-			slog.String("key", base64.StdEncoding.EncodeToString(req.GetKey())),
+			slog.String("key", base64.RawStdEncoding.EncodeToString(req.GetKey())),
 		)
 
 		// track message metrics

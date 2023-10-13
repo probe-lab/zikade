@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -256,7 +257,7 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 // putValueLocal stores a value in the local datastore without reaching out to
 // the network.
 func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValueLocal")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.putValueLocal")
 	defer span.End()
 
 	ns, path, err := record.SplitKey(key)
@@ -308,7 +309,7 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 // SearchValue will search in the DHT for keyStr. keyStr must have the form
 // `/$namespace/$binary_id`
 func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing.Option) (<-chan []byte, error) {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
 	defer span.End()
 
 	// first parse the routing options
@@ -364,7 +365,7 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 }
 
 func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string, path string, ropt *routing.Options, out chan<- []byte) {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
+	ctx, span := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
 	defer span.End()
 	defer close(out)
 
@@ -390,10 +391,14 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	quorum := d.getQuorum(ropt)
 
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
+		_, innerSpan := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine.QueryFunc")
+		defer innerSpan.End()
+
 		rec := resp.GetRecord()
 		if rec == nil {
 			return nil
 		}
+		runtime.Gosched()
 
 		if !bytes.Equal(routingKey, rec.GetKey()) {
 			return nil
@@ -402,11 +407,13 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		idx, _ := backend.Validate(ctx, path, best, rec.GetValue())
 		switch idx {
 		case 0: // "best" is still the best value
+			innerSpan.SetAttributes(attribute.String("better", "old"))
 			if bytes.Equal(best, rec.GetValue()) {
 				quorumPeers[id] = struct{}{}
 			}
 
 		case 1: // rec.GetValue() is better than our current "best"
+			innerSpan.SetAttributes(attribute.String("better", "new"))
 
 			// We have identified a better record. All peers that were currently
 			// in our set of quorum peers need to be updated wit this new record
@@ -422,6 +429,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 			best = rec.GetValue()
 			out <- best
 		case -1: // "best" and rec.GetValue() are both invalid
+			innerSpan.SetAttributes(attribute.String("better", "none"))
 			return nil
 
 		default:
