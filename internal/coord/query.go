@@ -391,6 +391,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 		return &EventOutboundSendMessage{
 			QueryID: st.QueryID,
 			To:      st.NodeID,
+			Target:  st.Target,
 			Message: st.Message,
 			Notify:  p,
 		}, true

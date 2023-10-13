@@ -1,6 +1,7 @@
 package coord
 
 import (
+	"github.com/plprobelab/zikade/internal/coord/brdcst"
 	"github.com/plprobelab/zikade/internal/coord/coordt"
 	"github.com/plprobelab/zikade/internal/coord/query"
 	"github.com/plprobelab/zikade/kadt"
@@ -27,12 +28,6 @@ type NetworkCommand interface {
 type QueryCommand interface {
 	BehaviourEvent
 	queryCommand()
-}
-
-// BrdcstCommand is a type of [BehaviourEvent] that instructs a [BrdcstBehaviour] to perform an action.
-type BrdcstCommand interface {
-	BehaviourEvent
-	brdcstCommand()
 }
 
 type NodeHandlerRequest interface {
@@ -77,6 +72,7 @@ func (*EventOutboundGetCloserNodes) networkCommand()     {}
 type EventOutboundSendMessage struct {
 	QueryID coordt.QueryID
 	To      kadt.PeerID
+	Target  kadt.Key
 	Message *pb.Message
 	Notify  Notify[BehaviourEvent]
 }
@@ -86,25 +82,25 @@ func (*EventOutboundSendMessage) nodeHandlerRequest() {}
 func (*EventOutboundSendMessage) networkCommand()     {}
 
 type EventStartMessageQuery struct {
-	QueryID           coordt.QueryID
-	Target            kadt.Key
-	Message           *pb.Message
-	KnownClosestNodes []kadt.PeerID
-	Notify            QueryMonitor[*EventQueryFinished]
-	NumResults        int                 // the minimum number of nodes to successfully contact before considering iteration complete
-	Strategy          query.QueryStrategy // the way the query should be performed - [query.QueryStrategyConverge] will be used by default.
+	QueryID    coordt.QueryID
+	Target     kadt.Key
+	Message    *pb.Message
+	Seed       []kadt.PeerID
+	Notify     QueryMonitor[*EventQueryFinished]
+	NumResults int                 // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy   query.QueryStrategy // the way the query should be performed - [query.QueryStrategyConverge] will be used by default.
 }
 
 func (*EventStartMessageQuery) behaviourEvent() {}
 func (*EventStartMessageQuery) queryCommand()   {}
 
 type EventStartFindCloserQuery struct {
-	QueryID           coordt.QueryID
-	Target            kadt.Key
-	KnownClosestNodes []kadt.PeerID
-	Notify            QueryMonitor[*EventQueryFinished]
-	NumResults        int                 // the minimum number of nodes to successfully contact before considering iteration complete
-	Strategy          query.QueryStrategy // the way the query should be performed - [query.QueryStrategyConverge] will be used by default.
+	QueryID    coordt.QueryID
+	Target     kadt.Key
+	Seed       []kadt.PeerID
+	Notify     QueryMonitor[*EventQueryFinished]
+	NumResults int                 // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy   query.QueryStrategy // the way the query should be performed - [query.QueryStrategyConverge] will be used by default.
 }
 
 func (*EventStartFindCloserQuery) behaviourEvent() {}
@@ -157,6 +153,7 @@ type EventSendMessageSuccess struct {
 	Request     *pb.Message
 	To          kadt.PeerID // To is the peer that the SendMessage request was sent to.
 	Response    *pb.Message
+	Target      kadt.Key
 	CloserNodes []kadt.PeerID
 }
 
@@ -254,3 +251,35 @@ type EventStartCrawl struct {
 }
 
 func (*EventStartCrawl) behaviourEvent() {}
+
+// BrdcstCommand is a type of [BehaviourEvent] that instructs a [BrdcstBehaviour] to perform an action.
+type BrdcstCommand interface {
+	BehaviourEvent
+	brdcstCommand()
+}
+
+// EventStartBroadcast starts a new
+type EventStartBroadcast struct {
+	QueryID coordt.QueryID
+	MsgFunc func(k kadt.Key) *pb.Message
+	Seed    []kadt.PeerID
+	Config  brdcst.Config
+	Notify  QueryMonitor[*EventBroadcastFinished]
+}
+
+func (*EventStartBroadcast) behaviourEvent() {}
+
+// EventBroadcastFinished is emitted by the coordinator when a broadcasting
+// a record to the network has finished, either through running to completion or
+// by being canceled.
+type EventBroadcastFinished struct {
+	QueryID   coordt.QueryID
+	Contacted []kadt.PeerID
+	Errors    map[string]struct {
+		Node kadt.PeerID
+		Err  error
+	}
+}
+
+func (*EventBroadcastFinished) behaviourEvent()     {}
+func (*EventBroadcastFinished) terminalQueryEvent() {}

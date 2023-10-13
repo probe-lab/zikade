@@ -209,6 +209,7 @@ func (p *Pool[K, N, M]) advanceQuery(ctx context.Context, qry *Query[K, N, M], q
 			QueryID: st.QueryID,
 			Stats:   st.Stats,
 			NodeID:  st.NodeID,
+			Target:  st.Target,
 			Message: st.Message,
 		}, true
 	case *StateQueryFinished[K, N]:
@@ -350,6 +351,7 @@ type StatePoolFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 type StatePoolSendMessage[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID
 	NodeID  N // the node to send the message to
+	Target  K
 	Message M
 	Stats   QueryStats
 }

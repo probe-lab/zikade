@@ -16,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multiaddr"
+	mh "github.com/multiformats/go-multihash"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
@@ -534,3 +535,72 @@ func (f *FullRT) searchValueRoutine(ctx context.Context, backend Backend, ns str
 		}
 	}()
 }
+
+func (f *FullRT) ProvideMany(ctx context.Context, mhashes []mh.Multihash) error {
+	_, span := f.tele.Tracer.Start(ctx, "FullRT.ProvideMany")
+	defer span.End()
+
+	_, found := f.backends[namespaceProviders]
+	if !found {
+		return routing.ErrNotSupported
+	}
+
+	// Compute addresses once for all provides
+	self := peer.AddrInfo{
+		ID:    f.host.ID(),
+		Addrs: f.host.Addrs(),
+	}
+	if len(self.Addrs) < 1 {
+		return fmt.Errorf("no known addresses for self, cannot put provider")
+	}
+
+	msgFn := func(k kadt.Key) *pb.Message {
+		return &pb.Message{
+			Type: pb.Message_ADD_PROVIDER,
+			Key:  k.MsgKey(),
+			ProviderPeers: []*pb.Message_Peer{
+				pb.FromAddrInfo(self),
+			},
+		}
+	}
+
+	keys := make([]kadt.Key, 0, len(mhashes))
+	for _, mhash := range mhashes {
+		keys = append(keys, kadt.NewKey(mhash))
+	}
+
+	// TODO: get seed set of peers
+	return f.kad.BroadcastMany(ctx, keys, nil, msgFn)
+}
+
+//func (f *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) error {
+//	_, span := f.tele.Tracer.Start(ctx, "FullRT.PutMany")
+//	defer span.End()
+//
+//
+//	if !dht.enableValues {
+//		return routing.ErrNotSupported
+//	}
+//
+//	if len(keys) != len(values) {
+//		return fmt.Errorf("number of keys does not match the number of values")
+//	}
+//
+//	keysAsPeerIDs := make([]peer.ID, 0, len(keys))
+//	keyRecMap := make(map[string][]byte)
+//	for i, k := range keys {
+//		keysAsPeerIDs = append(keysAsPeerIDs, peer.ID(k))
+//		keyRecMap[k] = values[i]
+//	}
+//
+//	if len(keys) != len(keyRecMap) {
+//		return fmt.Errorf("does not support duplicate keys")
+//	}
+//
+//	fn := func(ctx context.Context, p, k peer.ID) error {
+//		keyStr := string(k)
+//		return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
+//	}
+//
+//	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, false)
+//}

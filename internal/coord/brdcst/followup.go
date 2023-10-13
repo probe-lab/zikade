@@ -22,7 +22,7 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	queryID coordt.QueryID
 
 	// a struct holding configuration options
-	cfg *ConfigFollowUp
+	cfg *ConfigFollowUp[K]
 
 	// a reference to the query pool in which the "get closer nodes" queries
 	// will be spawned. This pool is governed by the broadcast [Pool].
@@ -30,8 +30,15 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	// the logic much easier to implement.
 	pool *query.Pool[K, N, M]
 
-	// the message that we will send to the closest nodes in the follow-up phase
-	msg M
+	// TODO: ...
+	started bool
+
+	// the message generator that takes a target key and will return the message
+	// that we will send to the closest nodes in the follow-up phase
+	msgFunc func(K) M
+
+	// TODO:
+	seed []N
 
 	// the closest nodes to the target key. This will be filled after the query
 	// for the closest nodes has finished (when the query pool emits a
@@ -56,12 +63,14 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 }
 
 // NewFollowUp initializes a new [FollowUp] struct.
-func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, pool *query.Pool[K, N, M], msg M, cfg *ConfigFollowUp) *FollowUp[K, N, M] {
-	return &FollowUp[K, N, M]{
+func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, msgFunc func(K) M, pool *query.Pool[K, N, M], seed []N, cfg *ConfigFollowUp[K]) *FollowUp[K, N, M] {
+	f := &FollowUp[K, N, M]{
 		queryID: qid,
 		cfg:     cfg,
 		pool:    pool,
-		msg:     msg,
+		started: false,
+		msgFunc: msgFunc,
+		seed:    seed,
 		todo:    map[string]N{},
 		waiting: map[string]N{},
 		success: map[string]N{},
@@ -70,6 +79,8 @@ func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Que
 			Err  error
 		}{},
 	}
+
+	return f
 }
 
 // Advance advances the state of the [FollowUp] [Broadcast] state machine. It
@@ -118,7 +129,8 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 		return &StateBroadcastStoreRecord[K, N, M]{
 			QueryID: f.queryID,
 			NodeID:  n,
-			Message: f.msg,
+			Target:  f.cfg.Target,
+			Message: f.msgFunc(f.cfg.Target),
 		}
 	}
 
@@ -149,12 +161,6 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 	}()
 
 	switch ev := ev.(type) {
-	case *EventBroadcastStart[K, N]:
-		return &query.EventPoolAddFindCloserQuery[K, N]{
-			QueryID: f.queryID,
-			Target:  ev.Target,
-			Seed:    ev.Seed,
-		}
 	case *EventBroadcastStop:
 		if f.isQueryDone() {
 			return nil
@@ -185,7 +191,14 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 			Err  error
 		}{Node: ev.NodeID, Err: ev.Error}
 	case *EventBroadcastPoll:
-		// ignore, nothing to do
+		if !f.started {
+			f.started = true
+			return &query.EventPoolAddFindCloserQuery[K, N]{
+				QueryID: f.queryID,
+				Target:  f.cfg.Target,
+				Seed:    f.seed,
+			}
+		}
 		return &query.EventPoolPoll{}
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", ev))

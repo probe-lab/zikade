@@ -239,6 +239,7 @@ func (q *Query[K, N, M]) Advance(ctx context.Context, ev QueryEvent) (out QueryS
 					returnState = &StateQuerySendMessage[K, N, M]{
 						NodeID:  ni.NodeID,
 						QueryID: q.id,
+						Target:  q.target,
 						Stats:   q.stats,
 						Message: q.msg,
 					}
@@ -399,6 +400,7 @@ type StateQueryFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 type StateQuerySendMessage[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID
 	NodeID  N // the node to send the message to
+	Target  K
 	Message M
 	Stats   QueryStats
 }

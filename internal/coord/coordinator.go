@@ -333,7 +333,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 		return nil, coordt.QueryStats{}, err
 	}
 
-	waiter := NewQueryWaiter(numResults)
+	waiter := NewQueryWaiter(cfg.NumResults)
 	queryID := c.newOperationID()
 
 	cmd := &EventStartFindCloserQuery{
@@ -383,7 +383,7 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 		return nil, coordt.QueryStats{}, err
 	}
 
-	waiter := NewQueryWaiter(numResults)
+	waiter := NewQueryWaiter(cfg.NumResults)
 	queryID := c.newOperationID()
 
 	cmd := &EventStartMessageQuery{
@@ -403,31 +403,21 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	return closest, stats, err
 }
 
-func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) error {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastRecord")
-	defer span.End()
-	if msg == nil {
-		return fmt.Errorf("no message supplied for broadcast")
-	}
-	c.cfg.Logger.Debug("starting broadcast with message", tele.LogAttrKey(msg.Target()), slog.String("type", msg.Type.String()))
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20) // TODO: parameterize
-	if err != nil {
-		return err
-	}
-	return c.broadcast(ctx, msg, seeds, brdcst.DefaultConfigFollowUp())
+func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, seed []kadt.PeerID) error {
+	msgFunc := func(k kadt.Key) *pb.Message { return msg }
+	return c.broadcast(ctx, msgFunc, seed, brdcst.DefaultConfigFollowUp(msg.Target()))
 }
 
-func (c *Coordinator) BroadcastStatic(ctx context.Context, msg *pb.Message, seeds []kadt.PeerID) error {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastStatic")
-	defer span.End()
-	return c.broadcast(ctx, msg, seeds, brdcst.DefaultConfigStatic())
+func (c *Coordinator) BroadcastStatic(ctx context.Context, msg *pb.Message, seed []kadt.PeerID) error {
+	msgFunc := func(k kadt.Key) *pb.Message { return msg }
+	return c.broadcast(ctx, msgFunc, seed, brdcst.DefaultConfigOneToMany(msg.Target()))
 }
 
-func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []kadt.PeerID, cfg brdcst.Config) error {
+func (c *Coordinator) BroadcastMany(ctx context.Context, keys []kadt.Key, seed []kadt.PeerID, msgFn func(k kadt.Key) *pb.Message) error {
+	return c.broadcast(ctx, msgFn, seed, brdcst.DefaultConfigManyToMany(keys))
+}
+
+func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *pb.Message, seeds []kadt.PeerID, cfg brdcst.Config) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.broadcast")
 	defer span.End()
 
@@ -439,8 +429,7 @@ func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []ka
 
 	cmd := &EventStartBroadcast{
 		QueryID: queryID,
-		Target:  msg.Target(),
-		Message: msg,
+		MsgFunc: msgFunc,
 		Seed:    seeds,
 		Notify:  waiter,
 		Config:  cfg,

@@ -166,6 +166,7 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 				QueryID: cmd.QueryID,
 				To:      h.self,
 				Request: cmd.Message,
+				Target:  cmd.Target,
 				Err:     fmt.Errorf("NodeHandler: %w", err),
 			})
 			return false
@@ -176,6 +177,7 @@ func (h *NodeHandler) send(ctx context.Context, ev NodeHandlerRequest) bool {
 			To:          h.self,
 			Request:     cmd.Message,
 			Response:    resp,
+			Target:      cmd.Target,
 			CloserNodes: resp.CloserNodes(),
 		})
 	default:

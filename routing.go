@@ -106,7 +106,7 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 	}
 
 	// construct message
-	addrInfo := peer.AddrInfo{
+	self := peer.AddrInfo{
 		ID:    d.host.ID(),
 		Addrs: d.host.Addrs(),
 	}
@@ -115,12 +115,17 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 		Type: pb.Message_ADD_PROVIDER,
 		Key:  c.Hash(),
 		ProviderPeers: []*pb.Message_Peer{
-			pb.FromAddrInfo(addrInfo),
+			pb.FromAddrInfo(self),
 		},
 	}
 
+	seed, err := d.kad.GetClosestNodes(ctx, msg.Target(), d.cfg.BucketSize)
+	if err != nil {
+		return fmt.Errorf("getting closest nodes: %w", err)
+	}
+
 	// finally, find the closest peers to the target key.
-	return d.kad.BroadcastRecord(ctx, msg)
+	return d.kad.BroadcastRecord(ctx, msg, seed)
 }
 
 func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
@@ -261,13 +266,13 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 		Record: record.MakePutRecord(keyStr, value),
 	}
 
-	// finally, find the closest peers to the target key.
-	err := d.kad.BroadcastRecord(ctx, msg)
+	seed, err := d.kad.GetClosestNodes(ctx, msg.Target(), d.cfg.BucketSize)
 	if err != nil {
-		return fmt.Errorf("query error: %w", err)
+		return fmt.Errorf("getting closest nodes: %w", err)
 	}
 
-	return nil
+	// finally, find the closest peers to the target key.
+	return d.kad.BroadcastRecord(ctx, msg, seed)
 }
 
 // putValueLocal stores a value in the local datastore without reaching out to

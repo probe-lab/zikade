@@ -165,8 +165,7 @@ func (b *PooledBroadcastBehaviour) perfomNextInbound(ctx context.Context) (Behav
 	case *EventStartBroadcast:
 		cmd = &brdcst.EventPoolStartBroadcast[kadt.Key, kadt.PeerID, *pb.Message]{
 			QueryID: ev.QueryID,
-			Target:  ev.Target,
-			Message: ev.Message,
+			MsgFunc: ev.MsgFunc,
 			Seed:    ev.Seed,
 			Config:  ev.Config,
 		}
@@ -227,6 +226,7 @@ func (b *PooledBroadcastBehaviour) perfomNextInbound(ctx context.Context) (Behav
 		cmd = &brdcst.EventPoolStoreRecordSuccess[kadt.Key, kadt.PeerID, *pb.Message]{
 			QueryID:  ev.QueryID,
 			NodeID:   ev.To,
+			Target:   ev.Target,
 			Request:  ev.Request,
 			Response: ev.Response,
 		}
@@ -242,6 +242,7 @@ func (b *PooledBroadcastBehaviour) perfomNextInbound(ctx context.Context) (Behav
 			NodeID:  ev.To,
 			QueryID: ev.QueryID,
 			Request: ev.Request,
+			Target:  ev.Target,
 			Error:   ev.Err,
 		}
 
@@ -277,6 +278,7 @@ func (b *PooledBroadcastBehaviour) advancePool(ctx context.Context, ev brdcst.Po
 		return &EventOutboundSendMessage{
 			QueryID: st.QueryID,
 			To:      st.NodeID,
+			Target:  st.Target,
 			Message: st.Message,
 			Notify:  b,
 		}, true

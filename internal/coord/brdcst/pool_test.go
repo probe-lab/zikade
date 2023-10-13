@@ -54,10 +54,9 @@ func TestPool_FollowUp_lifecycle(t *testing.T) {
 
 	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		Target:  target,
-		Message: msg,
+		MsgFunc: func(t tiny.Key) tiny.Message { return msg },
 		Seed:    []tiny.Node{a},
-		Config:  DefaultConfigFollowUp(),
+		Config:  DefaultConfigFollowUp(target),
 	})
 
 	// the query should attempt to contact the node it was given
@@ -191,10 +190,9 @@ func TestPool_FollowUp_stop_during_query(t *testing.T) {
 
 	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		Target:  target,
-		Message: msg,
+		MsgFunc: func(t tiny.Key) tiny.Message { return msg },
 		Seed:    []tiny.Node{a},
-		Config:  DefaultConfigFollowUp(),
+		Config:  DefaultConfigFollowUp(target),
 	})
 
 	// the query should attempt to contact the node it was given
@@ -235,10 +233,9 @@ func TestPool_FollowUp_stop_during_followup_phase(t *testing.T) {
 
 	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		Target:  target,
-		Message: msg,
+		MsgFunc: func(t tiny.Key) tiny.Message { return msg },
 		Seed:    []tiny.Node{a, b},
-		Config:  DefaultConfigFollowUp(),
+		Config:  DefaultConfigFollowUp(target),
 	})
 
 	require.IsType(t, &StatePoolFindCloser[tiny.Key, tiny.Node]{}, state)
@@ -288,13 +285,12 @@ func TestPool_empty_seed(t *testing.T) {
 
 	startEvt := &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		Target:  target,
-		Message: msg,
+		MsgFunc: func(t tiny.Key) tiny.Message { return msg },
 		Seed:    []tiny.Node{},
 	}
 
 	t.Run("follow up", func(t *testing.T) {
-		startEvt.Config = DefaultConfigFollowUp()
+		startEvt.Config = DefaultConfigFollowUp(target)
 
 		state := p.Advance(ctx, startEvt)
 		require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
@@ -304,7 +300,7 @@ func TestPool_empty_seed(t *testing.T) {
 	})
 
 	t.Run("static", func(t *testing.T) {
-		startEvt.Config = DefaultConfigStatic()
+		startEvt.Config = DefaultConfigOneToMany(target)
 		state := p.Advance(ctx, startEvt)
 		require.IsType(t, &StatePoolBroadcastFinished[tiny.Key, tiny.Node]{}, state)
 
@@ -332,10 +328,9 @@ func TestPool_Static_happy_path(t *testing.T) {
 
 	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		Target:  target,
-		Message: msg,
+		MsgFunc: func(t tiny.Key) tiny.Message { return msg },
 		Seed:    []tiny.Node{a, b, c},
-		Config:  DefaultConfigStatic(),
+		Config:  DefaultConfigOneToMany(target),
 	})
 	spsr, ok := state.(*StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message])
 	require.True(t, ok, "state is %T", state)
@@ -389,10 +384,9 @@ func TestPool_Static_stop_mid_flight(t *testing.T) {
 
 	state := p.Advance(ctx, &EventPoolStartBroadcast[tiny.Key, tiny.Node, tiny.Message]{
 		QueryID: queryID,
-		Target:  target,
-		Message: msg,
+		MsgFunc: func(t tiny.Key) tiny.Message { return msg },
 		Seed:    []tiny.Node{a, b, c},
-		Config:  DefaultConfigStatic(),
+		Config:  DefaultConfigOneToMany(target),
 	})
 	require.IsType(t, &StatePoolStoreRecord[tiny.Key, tiny.Node, tiny.Message]{}, state)
 
