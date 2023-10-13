@@ -44,7 +44,7 @@ type WorkQueueFunc[E BehaviourEvent] func(context.Context, E) bool
 // WorkQueueFunc for each work item, passing the original context
 // and event.
 type WorkQueue[E BehaviourEvent] struct {
-	pending chan pendingEvent[E]
+	pending chan CtxEvent[E]
 	fn      WorkQueueFunc[E]
 	done    atomic.Bool
 	once    sync.Once
@@ -52,13 +52,15 @@ type WorkQueue[E BehaviourEvent] struct {
 
 func NewWorkQueue[E BehaviourEvent](fn WorkQueueFunc[E]) *WorkQueue[E] {
 	w := &WorkQueue[E]{
-		pending: make(chan pendingEvent[E], 1),
+		pending: make(chan CtxEvent[E], 1),
 		fn:      fn,
 	}
 	return w
 }
 
-type pendingEvent[E any] struct {
+// CtxEvent holds and event with an associated context which may carry deadlines or
+// tracing information pertinent to the event.
+type CtxEvent[E any] struct {
 	Ctx   context.Context
 	Event E
 }
@@ -89,7 +91,7 @@ func (w *WorkQueue[E]) Enqueue(ctx context.Context, cmd E) error {
 	select {
 	case <-ctx.Done(): // this is the context for the work item
 		return ctx.Err()
-	case w.pending <- pendingEvent[E]{
+	case w.pending <- CtxEvent[E]{
 		Ctx:   ctx,
 		Event: cmd,
 	}:
@@ -147,37 +149,47 @@ func (w *Waiter[E]) Chan() <-chan WaiterEvent[E] {
 	return w.pending
 }
 
-// NotifyCloserHook implements the [NotifyCloser] interface and provides hooks
-// into the Notify and Close calls by wrapping another [NotifyCloser]. This is
-// intended to be used in testing.
-type NotifyCloserHook[E BehaviourEvent] struct {
-	nc           NotifyCloser[E]
-	BeforeNotify func(context.Context, E)
-	AfterNotify  func(context.Context, E)
-	BeforeClose  func()
-	AfterClose   func()
+// A QueryMonitor receives event notifications on the progress of a query
+type QueryMonitor[E TerminalQueryEvent] interface {
+	// NotifyProgressed returns a channel that can be used to send notification that a
+	// query has made progress. If the notification cannot be sent then it will be
+	// queued and retried at a later time. If the query completes before the progress
+	// notification can be sent the notification will be discarded.
+	NotifyProgressed() chan<- CtxEvent[*EventQueryProgressed]
+
+	// NotifyFinished returns a channel that can be used to send the notification that a
+	// query has completed. It is up to the implemention to ensure that the channel has enough
+	// capacity to receive the single notification.
+	// The sender must close all other QueryNotifier channels before sending on the NotifyFinished channel.
+	// The sender may attempt to drain any pending notifications before closing the other channels.
+	// The NotifyFinished channel will be closed once the sender has attempted to send the Finished notification.
+	NotifyFinished() chan<- CtxEvent[E]
 }
 
-var _ NotifyCloser[BehaviourEvent] = (*NotifyCloserHook[BehaviourEvent])(nil)
+// QueryMonitorHook wraps a [QueryMonitor] interface and provides hooks
+// that are invoked before calls to the QueryMonitor methods are forwarded.
+type QueryMonitorHook[E TerminalQueryEvent] struct {
+	qm               QueryMonitor[E]
+	BeforeProgressed func()
+	BeforeFinished   func()
+}
 
-func NewNotifyCloserHook[E BehaviourEvent](nc NotifyCloser[E]) *NotifyCloserHook[E] {
-	return &NotifyCloserHook[E]{
-		nc:           nc,
-		BeforeNotify: func(ctx context.Context, e E) {},
-		AfterNotify:  func(ctx context.Context, e E) {},
-		BeforeClose:  func() {},
-		AfterClose:   func() {},
+var _ QueryMonitor[*EventQueryFinished] = (*QueryMonitorHook[*EventQueryFinished])(nil)
+
+func NewQueryMonitorHook[E TerminalQueryEvent](qm QueryMonitor[E]) *QueryMonitorHook[E] {
+	return &QueryMonitorHook[E]{
+		qm:               qm,
+		BeforeProgressed: func() {},
+		BeforeFinished:   func() {},
 	}
 }
 
-func (n *NotifyCloserHook[E]) Notify(ctx context.Context, ev E) {
-	n.BeforeNotify(ctx, ev)
-	n.nc.Notify(ctx, ev)
-	n.AfterNotify(ctx, ev)
+func (n *QueryMonitorHook[E]) NotifyProgressed() chan<- CtxEvent[*EventQueryProgressed] {
+	n.BeforeProgressed()
+	return n.qm.NotifyProgressed()
 }
 
-func (n *NotifyCloserHook[E]) Close() {
-	n.BeforeClose()
-	n.nc.Close()
-	n.AfterClose()
+func (n *QueryMonitorHook[E]) NotifyFinished() chan<- CtxEvent[E] {
+	n.BeforeFinished()
+	return n.qm.NotifyFinished()
 }

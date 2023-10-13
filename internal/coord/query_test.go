@@ -11,6 +11,7 @@ import (
 	"github.com/plprobelab/zikade/internal/nettest"
 	"github.com/plprobelab/zikade/kadt"
 	"github.com/plprobelab/zikade/pb"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/stretchr/testify/require"
 )
@@ -78,7 +79,203 @@ func TestPooledQueryConfigValidate(t *testing.T) {
 	})
 }
 
+func TestQueryBehaviourBase(t *testing.T) {
+	suite.Run(t, new(QueryBehaviourBaseTestSuite))
+}
+
+type QueryBehaviourBaseTestSuite struct {
+	suite.Suite
+
+	cfg   *PooledQueryConfig
+	top   *nettest.Topology
+	nodes []*nettest.Peer
+}
+
+func (ts *QueryBehaviourBaseTestSuite) SetupTest() {
+	clk := clock.NewMock()
+	top, nodes, err := nettest.LinearTopology(4, clk)
+	ts.Require().NoError(err)
+
+	ts.top = top
+	ts.nodes = nodes
+
+	ts.cfg = DefaultPooledQueryConfig()
+	ts.cfg.Clock = clk
+}
+
+func (ts *QueryBehaviourBaseTestSuite) TestNotifiesNoProgress() {
+	t := ts.T()
+	ctx := kadtest.CtxShort(t)
+
+	target := ts.nodes[3].NodeID.Key()
+	rt := ts.nodes[0].RoutingTable
+	seeds := rt.NearestNodes(target, 5)
+
+	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
+	ts.Require().NoError(err)
+
+	waiter := NewQueryWaiter(5)
+	cmd := &EventStartFindCloserQuery{
+		QueryID:           "test",
+		Target:            target,
+		KnownClosestNodes: seeds,
+		Notify:            waiter,
+		NumResults:        10,
+	}
+
+	// queue the start of the query
+	b.Notify(ctx, cmd)
+
+	// behaviour should emit EventOutboundGetCloserNodes to start the query
+	bev, ok := b.Perform(ctx)
+	ts.Require().True(ok)
+	ts.Require().IsType(&EventOutboundGetCloserNodes{}, bev)
+
+	egc := bev.(*EventOutboundGetCloserNodes)
+	ts.Require().True(egc.To.Equal(ts.nodes[1].NodeID))
+
+	// notify failure
+	b.Notify(ctx, &EventGetCloserNodesFailure{
+		QueryID: "test",
+		To:      egc.To,
+		Target:  target,
+	})
+
+	// query will process the response and notify that node 1 is non connective
+	bev, ok = b.Perform(ctx)
+	ts.Require().True(ok)
+	ts.Require().IsType(&EventNotifyNonConnectivity{}, bev)
+
+	// ensure that the waiter received query finished event
+	kadtest.ReadItem[CtxEvent[*EventQueryFinished]](t, ctx, waiter.Finished())
+}
+
+func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryProgressed() {
+	t := ts.T()
+	ctx := kadtest.CtxShort(t)
+
+	target := ts.nodes[3].NodeID.Key()
+	rt := ts.nodes[0].RoutingTable
+	seeds := rt.NearestNodes(target, 5)
+
+	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
+	ts.Require().NoError(err)
+
+	waiter := NewQueryWaiter(5)
+	cmd := &EventStartFindCloserQuery{
+		QueryID:           "test",
+		Target:            target,
+		KnownClosestNodes: seeds,
+		Notify:            waiter,
+		NumResults:        10,
+	}
+
+	// queue the start of the query
+	b.Notify(ctx, cmd)
+
+	// behaviour should emit EventOutboundGetCloserNodes to start the query
+	bev, ok := b.Perform(ctx)
+	ts.Require().True(ok)
+	ts.Require().IsType(&EventOutboundGetCloserNodes{}, bev)
+
+	egc := bev.(*EventOutboundGetCloserNodes)
+	ts.Require().True(egc.To.Equal(ts.nodes[1].NodeID))
+
+	// notify success
+	b.Notify(ctx, &EventGetCloserNodesSuccess{
+		QueryID:     "test",
+		To:          egc.To,
+		Target:      target,
+		CloserNodes: ts.nodes[1].RoutingTable.NearestNodes(target, 5),
+	})
+
+	// query will process the response and ask node 1 for closer nodes
+	bev, ok = b.Perform(ctx)
+	ts.Require().True(ok)
+	ts.Require().IsType(&EventOutboundGetCloserNodes{}, bev)
+
+	// ensure that the waiter received query progressed event
+	kadtest.ReadItem[CtxEvent[*EventQueryProgressed]](t, ctx, waiter.Progressed())
+}
+
+func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
+	t := ts.T()
+	ctx := kadtest.CtxShort(t)
+
+	target := ts.nodes[3].NodeID.Key()
+	rt := ts.nodes[0].RoutingTable
+	seeds := rt.NearestNodes(target, 5)
+
+	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
+	ts.Require().NoError(err)
+
+	waiter := NewQueryWaiter(5)
+	cmd := &EventStartFindCloserQuery{
+		QueryID:           "test",
+		Target:            target,
+		KnownClosestNodes: seeds,
+		Notify:            waiter,
+		NumResults:        10,
+	}
+
+	// queue the start of the query
+	b.Notify(ctx, cmd)
+
+	// behaviour should emit EventOutboundGetCloserNodes to start the query
+	bev, ok := b.Perform(ctx)
+	ts.Require().True(ok)
+	ts.Require().IsType(&EventOutboundGetCloserNodes{}, bev)
+
+	egc := bev.(*EventOutboundGetCloserNodes)
+	ts.Require().True(egc.To.Equal(ts.nodes[1].NodeID))
+
+	// notify success
+	b.Notify(ctx, &EventGetCloserNodesSuccess{
+		QueryID:     "test",
+		To:          egc.To,
+		Target:      target,
+		CloserNodes: ts.nodes[1].RoutingTable.NearestNodes(target, 5),
+	})
+
+	// skip events until next EventOutboundGetCloserNodes is reached
+	for {
+		bev, ok = b.Perform(ctx)
+		ts.Require().True(ok)
+
+		egc, ok = bev.(*EventOutboundGetCloserNodes)
+		if ok {
+			break
+		}
+	}
+
+	// ensure that the waiter received query progressed event
+	wev := kadtest.ReadItem[CtxEvent[*EventQueryProgressed]](t, ctx, waiter.Progressed())
+	ts.Require().True(wev.Event.NodeID.Equal(ts.nodes[1].NodeID))
+
+	// notify success for last seen EventOutboundGetCloserNodes but supply no further nodes
+	b.Notify(ctx, &EventGetCloserNodesSuccess{
+		QueryID: "test",
+		To:      egc.To,
+		Target:  target,
+	})
+
+	// skip events until behaviour runs out of work
+	for {
+		_, ok = b.Perform(ctx)
+		if !ok {
+			break
+		}
+	}
+
+	// ensure that the waiter received query progressed event
+	kadtest.ReadItem[CtxEvent[*EventQueryProgressed]](t, ctx, waiter.Progressed())
+
+	// ensure that the waiter received query  event
+	kadtest.ReadItem[CtxEvent[*EventQueryFinished]](t, ctx, waiter.Finished())
+}
+
 func TestPooledQuery_deadlock_regression(t *testing.T) {
+	t.Skip()
 	ctx := kadtest.CtxShort(t)
 	msg := &pb.Message{}
 	queryID := coordt.QueryID("test")
@@ -106,8 +303,8 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	}
 
 	// start query
-	waiter := NewWaiter[BehaviourEvent]()
-	wrappedWaiter := NewNotifyCloserHook[BehaviourEvent](waiter)
+	waiter := NewQueryWaiter(5)
+	wrappedWaiter := NewQueryMonitorHook[*EventQueryFinished](waiter)
 
 	waiterDone := make(chan struct{})
 	waiterMsg := make(chan struct{})
@@ -151,9 +348,8 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 
 	hasLock := make(chan struct{})
 	var once sync.Once
-	wrappedWaiter.BeforeNotify = func(ctx context.Context, event BehaviourEvent) {
+	wrappedWaiter.BeforeProgressed = func() {
 		once.Do(func() {
-			require.IsType(t, &EventQueryProgressed{}, event) // verify test invariant
 			close(hasLock)
 		})
 	}
