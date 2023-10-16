@@ -18,7 +18,7 @@ import (
 	"github.com/plprobelab/zikade/tele"
 )
 
-type PooledQueryConfig struct {
+type QueryConfig struct {
 	// Clock is a clock that may replaced by a mock when testing
 	Clock clock.Clock
 
@@ -42,7 +42,7 @@ type PooledQueryConfig struct {
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
-func (cfg *PooledQueryConfig) Validate() error {
+func (cfg *QueryConfig) Validate() error {
 	if cfg.Clock == nil {
 		return &errs.ConfigurationError{
 			Component: "PooledQueryConfig",
@@ -94,8 +94,8 @@ func (cfg *PooledQueryConfig) Validate() error {
 	return nil
 }
 
-func DefaultPooledQueryConfig() *PooledQueryConfig {
-	return &PooledQueryConfig{
+func DefaultQueryConfig() *QueryConfig {
+	return &QueryConfig{
 		Clock:              clock.New(),
 		Logger:             tele.DefaultLogger("coord"),
 		Tracer:             tele.NoopTracer(),
@@ -107,10 +107,10 @@ func DefaultPooledQueryConfig() *PooledQueryConfig {
 	}
 }
 
-// PooledQueryBehaviour holds the behaviour and state for managing a pool of queries.
-type PooledQueryBehaviour struct {
+// QueryBehaviour holds the behaviour and state for managing a pool of queries.
+type QueryBehaviour struct {
 	// cfg is a copy of the optional configuration supplied to the behaviour.
-	cfg PooledQueryConfig
+	cfg QueryConfig
 
 	// performMu is held while Perform is executing to ensure sequential execution of work.
 	performMu sync.Mutex
@@ -137,11 +137,11 @@ type PooledQueryBehaviour struct {
 	ready chan struct{}
 }
 
-// NewPooledQueryBehaviour initialises a new PooledQueryBehaviour, setting up the query
+// NewQueryBehaviour initialises a new [QueryBehaviour], setting up the query
 // pool and other internal state.
-func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQueryBehaviour, error) {
+func NewQueryBehaviour(self kadt.PeerID, cfg *QueryConfig) (*QueryBehaviour, error) {
 	if cfg == nil {
-		cfg = DefaultPooledQueryConfig()
+		cfg = DefaultQueryConfig()
 	} else if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQ
 		return nil, fmt.Errorf("query pool: %w", err)
 	}
 
-	h := &PooledQueryBehaviour{
+	h := &QueryBehaviour{
 		cfg:       *cfg,
 		pool:      pool,
 		notifiers: make(map[coordt.QueryID]*queryNotifier[*EventQueryFinished]),
@@ -170,7 +170,7 @@ func NewPooledQueryBehaviour(self kadt.PeerID, cfg *PooledQueryConfig) (*PooledQ
 // Notify receives a behaviour event and takes appropriate actions such as starting,
 // stopping, or updating queries. It also queues events for later processing and
 // triggers the advancement of the query pool if applicable.
-func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
+func (p *QueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 	p.pendingInboundMu.Lock()
 	defer p.pendingInboundMu.Unlock()
 
@@ -187,14 +187,14 @@ func (p *PooledQueryBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
 
 // Ready returns a channel that signals when the pooled query behaviour is ready to
 // perform work.
-func (p *PooledQueryBehaviour) Ready() <-chan struct{} {
+func (p *QueryBehaviour) Ready() <-chan struct{} {
 	return p.ready
 }
 
 // Perform executes the next available task from the queue of pending events or advances
 // the query pool. Returns an event containing the result of the work performed and a
 // true value, or nil and a false value if no event was generated.
-func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
+func (p *QueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
 	p.performMu.Lock()
 	defer p.performMu.Unlock()
 
@@ -230,7 +230,7 @@ func (p *PooledQueryBehaviour) Perform(ctx context.Context) (BehaviourEvent, boo
 	return p.nextPendingOutbound()
 }
 
-func (p *PooledQueryBehaviour) nextPendingOutbound() (BehaviourEvent, bool) {
+func (p *QueryBehaviour) nextPendingOutbound() (BehaviourEvent, bool) {
 	if len(p.pendingOutbound) == 0 {
 		return nil, false
 	}
@@ -239,7 +239,7 @@ func (p *PooledQueryBehaviour) nextPendingOutbound() (BehaviourEvent, bool) {
 	return ev, true
 }
 
-func (p *PooledQueryBehaviour) nextPendingInbound() (CtxEvent[BehaviourEvent], bool) {
+func (p *QueryBehaviour) nextPendingInbound() (CtxEvent[BehaviourEvent], bool) {
 	p.pendingInboundMu.Lock()
 	defer p.pendingInboundMu.Unlock()
 	if len(p.pendingInbound) == 0 {
@@ -250,7 +250,7 @@ func (p *PooledQueryBehaviour) nextPendingInbound() (CtxEvent[BehaviourEvent], b
 	return pev, true
 }
 
-func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (BehaviourEvent, bool) {
+func (p *QueryBehaviour) perfomNextInbound(ctx context.Context) (BehaviourEvent, bool) {
 	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.perfomNextInbound")
 	defer span.End()
 	pev, ok := p.nextPendingInbound()
@@ -343,7 +343,7 @@ func (p *PooledQueryBehaviour) perfomNextInbound(ctx context.Context) (Behaviour
 	return p.advancePool(pev.Ctx, cmd)
 }
 
-func (p *PooledQueryBehaviour) updateReadyStatus() {
+func (p *QueryBehaviour) updateReadyStatus() {
 	if len(p.pendingOutbound) != 0 {
 		select {
 		case p.ready <- struct{}{}:
@@ -368,7 +368,7 @@ func (p *PooledQueryBehaviour) updateReadyStatus() {
 // advancePool advances the query pool state machine and returns an outbound event if
 // there is work to be performed. Also notifies waiters of query completion or
 // progress.
-func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (out BehaviourEvent, term bool) {
+func (p *QueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (out BehaviourEvent, term bool) {
 	ctx, span := p.cfg.Tracer.Start(ctx, "PooledQueryBehaviour.advancePool", trace.WithAttributes(tele.AttrInEvent(ev)))
 	defer func() {
 		span.SetAttributes(tele.AttrOutEvent(out))
@@ -416,7 +416,7 @@ func (p *PooledQueryBehaviour) advancePool(ctx context.Context, ev query.PoolEve
 	return nil, false
 }
 
-func (p *PooledQueryBehaviour) queueAddNodeEvents(nodes []kadt.PeerID) {
+func (p *QueryBehaviour) queueAddNodeEvents(nodes []kadt.PeerID) {
 	for _, info := range nodes {
 		p.pendingOutbound = append(p.pendingOutbound, &EventAddNode{
 			NodeID: info,
@@ -424,7 +424,7 @@ func (p *PooledQueryBehaviour) queueAddNodeEvents(nodes []kadt.PeerID) {
 	}
 }
 
-func (p *PooledQueryBehaviour) queueNonConnectivityEvent(nid kadt.PeerID) {
+func (p *QueryBehaviour) queueNonConnectivityEvent(nid kadt.PeerID) {
 	p.pendingOutbound = append(p.pendingOutbound, &EventNotifyNonConnectivity{
 		NodeID: nid,
 	})
