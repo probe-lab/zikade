@@ -275,7 +275,6 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 }
 
 func TestPooledQuery_deadlock_regression(t *testing.T) {
-	t.Skip()
 	ctx := kadtest.CtxShort(t)
 	msg := &pb.Message{}
 	queryID := coordt.QueryID("test")
@@ -341,10 +340,17 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 
 	// Advance the query pool state machine. Because we returned a new node
 	// above, the query pool state machine wants to send another outbound query
-	ev, _ = c.queryBehaviour.Perform(ctx)
-	require.IsType(t, &EventAddNode{}, ev) // event to notify the routing table
-	ev, _ = c.queryBehaviour.Perform(ctx)
-	require.IsType(t, &EventOutboundSendMessage{}, ev)
+	// and will notify the routing table
+
+	_, ok := c.queryBehaviour.Perform(ctx)
+	require.True(t, ok)
+
+	_, ok = c.queryBehaviour.Perform(ctx)
+	require.True(t, ok)
+
+	// no more work outstanding
+	_, ok = c.queryBehaviour.Perform(ctx)
+	require.False(t, ok)
 
 	hasLock := make(chan struct{})
 	var once sync.Once
@@ -361,7 +367,10 @@ func TestPooledQuery_deadlock_regression(t *testing.T) {
 	// of 1, the channel cannot hold both events. At the same time, the waiter
 	// doesn't consume the messages because it's busy processing the previous
 	// query event (because we haven't released the blocking waiterMsg call above).
-	go c.queryBehaviour.Notify(ctx, successMsg(nodes[2].NodeID))
+	go func() {
+		c.queryBehaviour.Notify(ctx, successMsg(nodes[2].NodeID))
+		c.queryBehaviour.Perform(ctx)
+	}()
 
 	// wait until the above Notify call was handled by waiting until the hasLock
 	// channel was closed in the above BeforeNotify hook. If that hook is called
