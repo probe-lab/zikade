@@ -16,34 +16,34 @@ import (
 	"github.com/plprobelab/zikade/pb"
 )
 
-func TestPooledQueryConfigValidate(t *testing.T) {
+func TestQueryConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 
 		require.NoError(t, cfg.Validate())
 	})
 
 	t.Run("clock is not nil", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 
 		cfg.Clock = nil
 		require.Error(t, cfg.Validate())
 	})
 
 	t.Run("logger not nil", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 		cfg.Logger = nil
 		require.Error(t, cfg.Validate())
 	})
 
 	t.Run("tracer not nil", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 		cfg.Tracer = nil
 		require.Error(t, cfg.Validate())
 	})
 
 	t.Run("query concurrency positive", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 
 		cfg.Concurrency = 0
 		require.Error(t, cfg.Validate())
@@ -52,7 +52,7 @@ func TestPooledQueryConfigValidate(t *testing.T) {
 	})
 
 	t.Run("query timeout positive", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 
 		cfg.Timeout = 0
 		require.Error(t, cfg.Validate())
@@ -61,7 +61,7 @@ func TestPooledQueryConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request concurrency positive", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 
 		cfg.RequestConcurrency = 0
 		require.Error(t, cfg.Validate())
@@ -70,7 +70,7 @@ func TestPooledQueryConfigValidate(t *testing.T) {
 	})
 
 	t.Run("request timeout positive", func(t *testing.T) {
-		cfg := DefaultPooledQueryConfig()
+		cfg := DefaultQueryConfig()
 
 		cfg.RequestTimeout = 0
 		require.Error(t, cfg.Validate())
@@ -86,7 +86,7 @@ func TestQueryBehaviourBase(t *testing.T) {
 type QueryBehaviourBaseTestSuite struct {
 	suite.Suite
 
-	cfg   *PooledQueryConfig
+	cfg   *QueryConfig
 	top   *nettest.Topology
 	nodes []*nettest.Peer
 }
@@ -99,7 +99,7 @@ func (ts *QueryBehaviourBaseTestSuite) SetupTest() {
 	ts.top = top
 	ts.nodes = nodes
 
-	ts.cfg = DefaultPooledQueryConfig()
+	ts.cfg = DefaultQueryConfig()
 	ts.cfg.Clock = clk
 }
 
@@ -111,7 +111,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesNoProgress() {
 	rt := ts.nodes[0].RoutingTable
 	seeds := rt.NearestNodes(target, 5)
 
-	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
+	b, err := NewQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
 	ts.Require().NoError(err)
 
 	waiter := NewQueryWaiter(5)
@@ -158,7 +158,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryProgressed() {
 	rt := ts.nodes[0].RoutingTable
 	seeds := rt.NearestNodes(target, 5)
 
-	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
+	b, err := NewQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
 	ts.Require().NoError(err)
 
 	waiter := NewQueryWaiter(5)
@@ -206,7 +206,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 	rt := ts.nodes[0].RoutingTable
 	seeds := rt.NearestNodes(target, 5)
 
-	b, err := NewPooledQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
+	b, err := NewQueryBehaviour(ts.nodes[0].NodeID, ts.cfg)
 	ts.Require().NoError(err)
 
 	waiter := NewQueryWaiter(5)
@@ -274,7 +274,7 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 	kadtest.ReadItem[CtxEvent[*EventQueryFinished]](t, ctx, waiter.Finished())
 }
 
-func TestPooledQuery_deadlock_regression(t *testing.T) {
+func TestQuery_deadlock_regression(t *testing.T) {
 	t.Skip()
 	ctx := kadtest.CtxShort(t)
 	msg := &pb.Message{}
