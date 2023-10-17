@@ -39,6 +39,10 @@ type QueryConfig struct {
 
 	// RequestTimeout is the timeout queries should use for contacting a single node
 	RequestTimeout time.Duration
+
+	NumResults int
+
+	Strategy query.QueryStrategy
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -103,7 +107,8 @@ func DefaultQueryConfig() *QueryConfig {
 		Timeout:            5 * time.Minute, // MAGIC
 		RequestConcurrency: 3,               // MAGIC
 		RequestTimeout:     time.Minute,     // MAGIC
-
+		NumResults:         20,              // MAGIC
+		Strategy:           &query.QueryStrategyConverge{},
 	}
 }
 

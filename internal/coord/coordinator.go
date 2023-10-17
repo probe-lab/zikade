@@ -9,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/plprobelab/zikade/internal/coord/query"
-
 	"github.com/benbjohnson/clock"
 	"github.com/plprobelab/go-libdht/kad"
 	"go.opentelemetry.io/otel"
@@ -291,18 +289,6 @@ func (c *Coordinator) IsRoutable(ctx context.Context, id kadt.PeerID) bool {
 // GetClosestNodes requests the n closest nodes to the key from the node's local routing table.
 func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([]kadt.PeerID, error) {
 	return c.rt.NearestNodes(k, n), nil
-}
-
-type QueryConfig struct {
-	NumResults int
-	Strategy   query.QueryStrategy
-}
-
-func DefaultQueryConfig() *QueryConfig {
-	return &QueryConfig{
-		NumResults: 20,
-		Strategy:   &query.QueryStrategyConverge{},
-	}
 }
 
 // QueryClosest starts a query that attempts to find the closest nodes to the target key.
