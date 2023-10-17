@@ -141,8 +141,6 @@ func (q *Query[K, N, M]) Advance(ctx context.Context, ev QueryEvent) (out QueryS
 		span.End()
 	}()
 
-	span.SpanContext()
-
 	if q.finished {
 		return &StateQueryFinished[K, N]{
 			QueryID:      q.id,

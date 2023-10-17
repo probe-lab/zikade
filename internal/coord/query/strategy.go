@@ -1,13 +1,19 @@
 package query
 
-type QueryStrategy interface {
+// Strategy is an interface that all query strategies need to implement.
+// This ensures that only valid and supported strategies can be passed into
+// the query behaviour/state machines.
+type Strategy interface {
 	queryStrategy()
 }
 
-type QueryStrategyConverge struct{}
+func (q *StrategyConverge) queryStrategy() {}
+func (q *StrategyStatic) queryStrategy()   {}
 
-func (q *QueryStrategyConverge) queryStrategy() {}
+// StrategyConverge is used by default. In this case we are searching for ever
+// closer nodes to a certain key and hence converging in the key space.
+type StrategyConverge struct{}
 
-type QueryStrategyStatic struct{}
-
-func (q *QueryStrategyStatic) queryStrategy() {}
+// StrategyStatic is the alternative query strategy in which we just contact
+// a static list of preconfigured nodes.
+type StrategyStatic struct{}

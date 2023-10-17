@@ -343,7 +343,7 @@ func (f *FullRT) Bootstrap(ctx context.Context) error {
 func (f *FullRT) queryConfig() *coord.QueryConfig {
 	cfg := coord.DefaultQueryConfig()
 	cfg.NumResults = f.cfg.BucketSize
-	cfg.Strategy = &query.QueryStrategyStatic{}
+	cfg.Strategy = &query.StrategyStatic{}
 	return cfg
 }
 

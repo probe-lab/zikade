@@ -40,9 +40,15 @@ type QueryConfig struct {
 	// RequestTimeout is the timeout queries should use for contacting a single node
 	RequestTimeout time.Duration
 
+	// NumResults specifies the number of results (nodes) we are searching for
 	NumResults int
 
-	Strategy query.QueryStrategy
+	// Strategy specifies the query strategy that should be used. By default,
+	// we are using the [query.StrategyConverge] which searches for ever
+	// closer nodes to a certain key and hence converging in the key space.
+	// Alternatively, there's also [query.StrategyStatic] which just
+	// contacts a static list of preconfigured peers.
+	Strategy query.Strategy
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -108,7 +114,7 @@ func DefaultQueryConfig() *QueryConfig {
 		RequestConcurrency: 3,               // MAGIC
 		RequestTimeout:     time.Minute,     // MAGIC
 		NumResults:         20,              // MAGIC
-		Strategy:           &query.QueryStrategyConverge{},
+		Strategy:           &query.StrategyConverge{},
 	}
 }
 

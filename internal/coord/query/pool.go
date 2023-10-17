@@ -266,9 +266,9 @@ func (p *Pool[K, N, M]) addQuery(ctx context.Context, evt *EventPoolAddQuery[K, 
 
 	var iter NodeIter[K, N]
 	switch evt.Strategy.(type) {
-	case *QueryStrategyConverge:
+	case *StrategyConverge:
 		iter = NewClosestNodesIter[K, N](evt.Target)
-	case *QueryStrategyStatic:
+	case *StrategyStatic:
 		iter = NewStaticIter[K, N](evt.Seed)
 	default:
 		iter = NewClosestNodesIter[K, N](evt.Target) // default if unset
@@ -302,9 +302,9 @@ func (p *Pool[K, N, M]) addFindCloserQuery(ctx context.Context, evt *EventPoolAd
 
 	var iter NodeIter[K, N]
 	switch evt.Strategy.(type) {
-	case *QueryStrategyConverge:
+	case *StrategyConverge:
 		iter = NewClosestNodesIter[K, N](evt.Target)
-	case *QueryStrategyStatic:
+	case *StrategyStatic:
 		iter = NewStaticIter[K, N](evt.Seed)
 	default:
 		iter = NewClosestNodesIter[K, N](evt.Target) // default if unset
@@ -397,7 +397,7 @@ type EventPoolAddFindCloserQuery[K kad.Key[K], N kad.NodeID[K]] struct {
 	Target     K              // the target key for the query
 	Seed       []N            // an initial set of close nodes the query should use
 	NumResults int            // the minimum number of nodes to successfully contact before considering iteration complete
-	Strategy   QueryStrategy  // the way the query should be performed - [QueryStrategyConverge] will be used by default.
+	Strategy   Strategy       // the way the query should be performed - [StrategyConverge] will be used by default.
 }
 
 // EventPoolAddQuery is an event that attempts to add a new query that sends a message.
@@ -407,7 +407,7 @@ type EventPoolAddQuery[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	Message    M              // message to be sent to each node
 	Seed       []N            // an initial set of close nodes the query should use
 	NumResults int            // the minimum number of nodes to successfully contact before considering iteration complete
-	Strategy   QueryStrategy  // the way the query should be performed - [QueryStrategyConverge] will be used by default.
+	Strategy   Strategy       // the way the query should be performed - [StrategyConverge] will be used by default.
 }
 
 // EventPoolStopQuery notifies a [Pool] to stop a query.
