@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/plprobelab/go-libdht/kad/key"
 	"github.com/stretchr/testify/require"
 
 	"github.com/plprobelab/zikade/internal/coord/coordt"
@@ -46,6 +47,8 @@ func TestNewManyToMany(t *testing.T) {
 		require.Len(t, sm.inflightAtCapacity, 0)
 		require.NotNil(t, sm.processedNodes)
 		require.Len(t, sm.processedNodes, 0)
+		require.Len(t, sm.keyReports, 0)
+		require.NotNil(t, sm.keyReports)
 		require.NotNil(t, sm.msgFunc)
 
 		state := sm.Advance(ctx, &EventBroadcastPoll{})
@@ -68,6 +71,7 @@ func TestNewManyToMany(t *testing.T) {
 		require.Len(t, sm.inflightWithCapacity, 0)
 		require.Len(t, sm.inflightAtCapacity, 0)
 		require.Len(t, sm.processedNodes, 0)
+		require.Len(t, sm.keyReports, 0)
 		require.NotNil(t, sm.msgFunc)
 
 		state := sm.Advance(ctx, &EventBroadcastPoll{})
@@ -97,6 +101,7 @@ func TestNewManyToMany(t *testing.T) {
 		require.Len(t, sm.inflightWithCapacity, 0)
 		require.Len(t, sm.inflightAtCapacity, 0)
 		require.Len(t, sm.processedNodes, 0)
+		require.Len(t, sm.keyReports, 20)
 		require.NotNil(t, sm.msgFunc)
 	})
 
@@ -158,6 +163,10 @@ func TestManyToMany_Advance_single_target_single_seed(t *testing.T) {
 	require.True(t, ok, "type is %T", state)
 	require.Equal(t, fstate.QueryID, qid)
 	require.Equal(t, seed[0], fstate.Contacted[0])
+
+	require.Equal(t, 1, sm.keyReports[key.HexString(targets[0])].successes)
+	require.Equal(t, 0, sm.keyReports[key.HexString(targets[0])].failures)
+	require.False(t, sm.keyReports[key.HexString(targets[0])].lastSuccess.IsZero())
 }
 
 func TestManyToMany_Advance_multi_target_single_seed(t *testing.T) {

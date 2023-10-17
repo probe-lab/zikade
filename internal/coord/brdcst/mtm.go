@@ -26,30 +26,31 @@ type ManyToMany[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 
 	// keyReports tracks for each key this [ManyToMany] state machine should
 	// broadcast the number of successes and failures.
+	// TODO: perhaps this is better tracked outside of this state machine?
 	keyReports map[string]*report
 
-	// unprocessedNodes is a map from a node's ID to its [nodeState]. The
-	// [nodeState] contains information about all the keys that should be
+	// unprocessedNodes is a map from a node's ID to its [NodeState]. The
+	// [NodeState] contains information about all the keys that should be
 	// stored with that node, as well as, a map of all inflight requests and
 	// all keys that have already been tried to store with that node.
-	unprocessedNodes map[string]*nodeState[K, N]
+	unprocessedNodes map[string]*NodeState[K, N]
 
 	// inflightWithCapacity holds information about nodes that we are currently
 	// contacting but still have capacity to receive more requests from us. The
 	// term capacity refers to the number of concurrent streams we can open to
 	// a single node based on [ConfigManyToMany.StreamConcurrency].
-	inflightWithCapacity map[string]*nodeState[K, N]
+	inflightWithCapacity map[string]*NodeState[K, N]
 
 	// inflightWithCapacity holds information about nodes that we are currently
 	// contacting with no capacity to receive more concurrent streams. The
 	// term capacity refers to the number of concurrent streams we can open
 	// to a single node based on [ConfigManyToMany.StreamConcurrency].
-	inflightAtCapacity map[string]*nodeState[K, N]
+	inflightAtCapacity map[string]*NodeState[K, N]
 
-	// processedNodes is a map from a node's ID to its [nodeState]. All nodes
+	// processedNodes is a map from a node's ID to its [NodeState]. All nodes
 	// in this map have been fully processed. This means that all keys we wanted
 	// to store with a node have been attempted to be stored with it.
-	processedNodes map[string]*nodeState[K, N]
+	processedNodes map[string]*NodeState[K, N]
 
 	// msgFunc takes a key and returns the corresponding message that we will
 	// need to send to the remote node to store said key.
@@ -61,7 +62,7 @@ type brdcstManyMapVal[K kad.Key[K], N kad.NodeID[K]] struct {
 	node   N
 }
 
-type nodeState[K kad.Key[K], N kad.NodeID[K]] struct {
+type NodeState[K kad.Key[K], N kad.NodeID[K]] struct {
 	node     N
 	todo     []K
 	inflight map[string]K
@@ -81,6 +82,8 @@ func NewManyToMany[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Q
 		t.Add(s.Key(), s)
 	}
 
+	// TODO: the below is quite expensive for many keys. It's probably worth doing this outside of the event loop
+
 	// find out which seed nodes are responsible to hold the provider/put
 	// record for which target key.
 	keyReports := make(map[string]*report, len(cfg.Targets))
@@ -88,7 +91,11 @@ func NewManyToMany[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Q
 	for _, target := range cfg.Targets {
 		entries := trie.Closest(t, target, 20) // TODO: make configurable
 		targetMapKey := key.HexString(target)
-		keyReports[targetMapKey] = &report{}
+
+		if len(entries) > 0 {
+			keyReports[targetMapKey] = &report{}
+		}
+
 		for _, entry := range entries {
 			node := entry.Data
 			nodeMapKey := node.String()
@@ -100,13 +107,13 @@ func NewManyToMany[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Q
 		}
 	}
 
-	unprocessedNodes := make(map[string]*nodeState[K, N], len(mappings))
+	unprocessedNodes := make(map[string]*NodeState[K, N], len(mappings))
 	for node, mapVals := range mappings {
 		if len(mapVals) == 0 {
 			continue
 		}
 
-		unprocessedNodes[node] = &nodeState[K, N]{
+		unprocessedNodes[node] = &NodeState[K, N]{
 			todo:     make([]K, 0, len(mapVals)),
 			done:     make([]K, 0, len(mapVals)),
 			inflight: map[string]K{},
@@ -122,9 +129,9 @@ func NewManyToMany[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Q
 		cfg:                  cfg,
 		keyReports:           keyReports,
 		unprocessedNodes:     unprocessedNodes,
-		inflightWithCapacity: map[string]*nodeState[K, N]{},
-		inflightAtCapacity:   map[string]*nodeState[K, N]{},
-		processedNodes:       map[string]*nodeState[K, N]{},
+		inflightWithCapacity: map[string]*NodeState[K, N]{},
+		inflightAtCapacity:   map[string]*NodeState[K, N]{},
+		processedNodes:       map[string]*NodeState[K, N]{},
 		msgFunc:              msgFunc,
 	}
 }
@@ -140,32 +147,18 @@ func (mtm *ManyToMany[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) 
 	switch ev := ev.(type) {
 	case *EventBroadcastStop:
 	case *EventBroadcastStoreRecordSuccess[K, N, M]:
-		mapKey := ev.NodeID.String()
-		if nstate, found := mtm.inflightAtCapacity[mapKey]; found {
-			delete(mtm.inflightAtCapacity, mapKey)
-			delete(nstate.inflight, key.HexString(ev.Target))
-			nstate.done = append(nstate.done, ev.Target)
+		mtm.handleStoreRecordResult(ev.NodeID, ev.Target)
 
-			if len(nstate.todo) == 0 {
-				if len(nstate.inflight) == 0 {
-					mtm.processedNodes[mapKey] = nstate
-				} else {
-					mtm.inflightAtCapacity[mapKey] = nstate
-				}
-			} else if len(nstate.inflight) != 0 {
-				mtm.inflightWithCapacity[mapKey] = nstate
-			}
-		} else if nstate, found := mtm.inflightWithCapacity[mapKey]; found {
-			delete(mtm.inflightWithCapacity, mapKey)
-			delete(nstate.inflight, key.HexString(ev.Target))
-			nstate.done = append(nstate.done, ev.Target)
-
-			if len(nstate.todo) != 0 {
-				mtm.inflightWithCapacity[mapKey] = nstate
-			}
-		}
+		targetMapKey := key.HexString(ev.Target)
+		mtm.keyReports[targetMapKey].successes += 1
+		mtm.keyReports[targetMapKey].lastSuccess = time.Now()
 
 	case *EventBroadcastStoreRecordFailure[K, N, M]:
+		mtm.handleStoreRecordResult(ev.NodeID, ev.Target)
+
+		targetMapKey := key.HexString(ev.Target)
+		mtm.keyReports[targetMapKey].failures += 1
+
 	case *EventBroadcastPoll:
 		// ignore, nothing to do
 	default:
@@ -234,5 +227,33 @@ func (mtm *ManyToMany[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) 
 			Node N
 			Err  error
 		}{},
+	}
+}
+
+func (mtm *ManyToMany[K, N, M]) handleStoreRecordResult(node N, target K) {
+	nodeMapKey := node.String()
+	targetMapKey := key.HexString(target)
+	if nstate, found := mtm.inflightAtCapacity[nodeMapKey]; found {
+		delete(mtm.inflightAtCapacity, nodeMapKey)
+		delete(nstate.inflight, targetMapKey)
+		nstate.done = append(nstate.done, target)
+
+		if len(nstate.todo) == 0 {
+			if len(nstate.inflight) == 0 {
+				mtm.processedNodes[nodeMapKey] = nstate
+			} else {
+				mtm.inflightAtCapacity[nodeMapKey] = nstate
+			}
+		} else if len(nstate.inflight) != 0 {
+			mtm.inflightWithCapacity[nodeMapKey] = nstate
+		}
+	} else if nstate, found := mtm.inflightWithCapacity[nodeMapKey]; found {
+		delete(mtm.inflightWithCapacity, nodeMapKey)
+		delete(nstate.inflight, targetMapKey)
+		nstate.done = append(nstate.done, target)
+
+		if len(nstate.todo) != 0 {
+			mtm.inflightWithCapacity[nodeMapKey] = nstate
+		}
 	}
 }

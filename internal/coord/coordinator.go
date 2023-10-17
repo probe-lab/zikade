@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -413,11 +414,20 @@ func (c *Coordinator) BroadcastStatic(ctx context.Context, msg *pb.Message, seed
 	return c.broadcast(ctx, msgFunc, seed, brdcst.DefaultConfigOneToMany(msg.Target()))
 }
 
-func (c *Coordinator) BroadcastMany(ctx context.Context, keys []kadt.Key, seed []kadt.PeerID, msgFn func(k kadt.Key) *pb.Message) error {
+func (c *Coordinator) BroadcastMany(ctx context.Context, keys []kadt.Key, msgFn func(k kadt.Key) *pb.Message) error {
+	// verify that we have keys to push into the network
+	if len(keys) == 0 {
+		return fmt.Errorf("no keys to broadcast")
+	}
+
+	// grab the entire routing table contents
+	seed := c.rt.NearestNodes(keys[0], math.MaxInt)
+
+	// start broadcasting
 	return c.broadcast(ctx, msgFn, seed, brdcst.DefaultConfigManyToMany(keys))
 }
 
-func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *pb.Message, seeds []kadt.PeerID, cfg brdcst.Config) error {
+func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *pb.Message, seed []kadt.PeerID, cfg brdcst.Config) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.broadcast")
 	defer span.End()
 
@@ -430,7 +440,7 @@ func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *p
 	cmd := &EventStartBroadcast{
 		QueryID: queryID,
 		MsgFunc: msgFunc,
-		Seed:    seeds,
+		Seed:    seed,
 		Notify:  waiter,
 		Config:  cfg,
 	}
