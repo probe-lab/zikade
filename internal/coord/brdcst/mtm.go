@@ -24,22 +24,35 @@ type ManyToMany[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	// a struct holding configuration options
 	cfg *ConfigManyToMany[K]
 
-	// TODO
+	// keyReports tracks for each key this [ManyToMany] state machine should
+	// broadcast the number of successes and failures.
 	keyReports map[string]*report
 
-	// TODO
+	// unprocessedNodes is a map from a node's ID to its [nodeState]. The
+	// [nodeState] contains information about all the keys that should be
+	// stored with that node, as well as, a map of all inflight requests and
+	// all keys that have already been tried to store with that node.
 	unprocessedNodes map[string]*nodeState[K, N]
 
-	// TODO
+	// inflightWithCapacity holds information about nodes that we are currently
+	// contacting but still have capacity to receive more requests from us. The
+	// term capacity refers to the number of concurrent streams we can open to
+	// a single node based on [ConfigManyToMany.StreamConcurrency].
 	inflightWithCapacity map[string]*nodeState[K, N]
 
-	// TODO
+	// inflightWithCapacity holds information about nodes that we are currently
+	// contacting with no capacity to receive more concurrent streams. The
+	// term capacity refers to the number of concurrent streams we can open
+	// to a single node based on [ConfigManyToMany.StreamConcurrency].
 	inflightAtCapacity map[string]*nodeState[K, N]
 
-	// TODO
+	// processedNodes is a map from a node's ID to its [nodeState]. All nodes
+	// in this map have been fully processed. This means that all keys we wanted
+	// to store with a node have been attempted to be stored with it.
 	processedNodes map[string]*nodeState[K, N]
 
-	// TODO
+	// msgFunc takes a key and returns the corresponding message that we will
+	// need to send to the remote node to store said key.
 	msgFunc func(K) M
 }
 
@@ -117,29 +130,38 @@ func NewManyToMany[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Q
 }
 
 // Advance advances the state of the [ManyToMany] [Broadcast] state machine.
-func (otm *ManyToMany[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out BroadcastState) {
+func (mtm *ManyToMany[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out BroadcastState) {
 	_, span := tele.StartSpan(ctx, "ManyToMany.Advance", trace.WithAttributes(tele.AttrInEvent(ev)))
-	defer span.End()
+	defer func() {
+		span.SetAttributes(tele.AttrOutEvent(out))
+		span.End()
+	}()
 
 	switch ev := ev.(type) {
 	case *EventBroadcastStop:
 	case *EventBroadcastStoreRecordSuccess[K, N, M]:
-		if nstate, found := otm.inflightAtCapacity[ev.NodeID.String()]; found {
+		mapKey := ev.NodeID.String()
+		if nstate, found := mtm.inflightAtCapacity[mapKey]; found {
+			delete(mtm.inflightAtCapacity, mapKey)
 			delete(nstate.inflight, key.HexString(ev.Target))
 			nstate.done = append(nstate.done, ev.Target)
 
-			delete(otm.inflightAtCapacity, ev.NodeID.String())
-			if len(nstate.todo) == 0 && len(nstate.inflight) == 0 {
-				otm.processedNodes[ev.NodeID.String()] = nstate
-			} else {
-				otm.inflightWithCapacity[ev.NodeID.String()] = nstate
+			if len(nstate.todo) == 0 {
+				if len(nstate.inflight) == 0 {
+					mtm.processedNodes[mapKey] = nstate
+				} else {
+					mtm.inflightAtCapacity[mapKey] = nstate
+				}
+			} else if len(nstate.inflight) != 0 {
+				mtm.inflightWithCapacity[mapKey] = nstate
 			}
-		} else if nstate, found := otm.inflightWithCapacity[ev.NodeID.String()]; found {
+		} else if nstate, found := mtm.inflightWithCapacity[mapKey]; found {
+			delete(mtm.inflightWithCapacity, mapKey)
 			delete(nstate.inflight, key.HexString(ev.Target))
 			nstate.done = append(nstate.done, ev.Target)
 
-			if len(nstate.todo) == 0 && len(nstate.inflight) == 0 {
-				otm.processedNodes[ev.NodeID.String()] = nstate
+			if len(nstate.todo) != 0 {
+				mtm.inflightWithCapacity[mapKey] = nstate
 			}
 		}
 
@@ -150,51 +172,67 @@ func (otm *ManyToMany[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) 
 		panic(fmt.Sprintf("unexpected event: %T", ev))
 	}
 
-	if len(otm.inflightWithCapacity)+len(otm.inflightAtCapacity) == otm.cfg.NodeConcurrency {
-		for node, nstate := range otm.inflightWithCapacity {
-			var popped K
-			popped, nstate.todo = nstate.todo[0], nstate.todo[1:]
+	for node, nstate := range mtm.inflightWithCapacity {
+		var popped K
+		popped, nstate.todo = nstate.todo[0], nstate.todo[1:]
 
-			nstate.inflight[key.HexString(popped)] = popped
+		nstate.inflight[key.HexString(popped)] = popped
 
-			if len(nstate.todo) == 0 || len(nstate.inflight) == otm.cfg.StreamConcurrency {
-				delete(otm.inflightWithCapacity, node)
-				otm.inflightAtCapacity[nstate.node.String()] = nstate
-			}
-
-			return &StateBroadcastStoreRecord[K, N, M]{
-				QueryID: otm.queryID,
-				NodeID:  nstate.node,
-				Target:  popped,
-				Message: otm.msgFunc(popped),
-			}
+		if len(nstate.todo) == 0 || len(nstate.inflight) == mtm.cfg.StreamConcurrency {
+			delete(mtm.inflightWithCapacity, node)
+			mtm.inflightAtCapacity[nstate.node.String()] = nstate
 		}
 
-		return &StateBroadcastWaiting{
-			QueryID: otm.queryID,
+		return &StateBroadcastStoreRecord[K, N, M]{
+			QueryID: mtm.queryID,
+			NodeID:  nstate.node,
+			Target:  popped,
+			Message: mtm.msgFunc(popped),
 		}
 	}
 
-	for nodeStr, nstate := range otm.unprocessedNodes {
-		delete(otm.unprocessedNodes, nodeStr)
+	// check if we are currently talking to the maximum number of nodes
+	// concurrently.
+	inflightNodes := len(mtm.inflightWithCapacity) + len(mtm.inflightAtCapacity)
+	if inflightNodes == mtm.cfg.NodeConcurrency || (inflightNodes > 0 && len(mtm.unprocessedNodes) == 0) {
+		return &StateBroadcastWaiting{
+			QueryID: mtm.queryID,
+		}
+	}
+
+	// we still have the capacity to contact more nodes
+	for nodeStr, nstate := range mtm.unprocessedNodes {
+		delete(mtm.unprocessedNodes, nodeStr)
 
 		var popped K
 		popped, nstate.todo = nstate.todo[0], nstate.todo[1:]
 		nstate.inflight[key.HexString(popped)] = popped
 
 		if len(nstate.todo) == 0 {
-			otm.inflightAtCapacity[nstate.node.String()] = nstate
+			mtm.inflightAtCapacity[nodeStr] = nstate
 		} else {
-			otm.inflightWithCapacity[nstate.node.String()] = nstate
+			mtm.inflightWithCapacity[nodeStr] = nstate
 		}
 
 		return &StateBroadcastStoreRecord[K, N, M]{
-			QueryID: otm.queryID,
+			QueryID: mtm.queryID,
 			NodeID:  nstate.node,
 			Target:  popped,
-			Message: otm.msgFunc(popped),
+			Message: mtm.msgFunc(popped),
 		}
 	}
 
-	return &StateBroadcastIdle{}
+	contacted := make([]N, 0, len(mtm.processedNodes))
+	for _, ns := range mtm.processedNodes {
+		contacted = append(contacted, ns.node)
+	}
+
+	return &StateBroadcastFinished[K, N]{
+		QueryID:   mtm.queryID,
+		Contacted: contacted,
+		Errors: map[string]struct {
+			Node N
+			Err  error
+		}{},
+	}
 }
