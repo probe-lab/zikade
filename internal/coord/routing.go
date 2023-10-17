@@ -290,24 +290,40 @@ type RoutingBehaviour struct {
 	// cfg is a copy of the optional configuration supplied to the behaviour
 	cfg RoutingConfig
 
+	// performMu is held while Perform is executing to ensure sequential execution of work.
+	performMu sync.Mutex
+
 	// bootstrap is the bootstrap state machine, responsible for bootstrapping the routing table
+	// it must only be accessed while performMu is held
 	bootstrap coordt.StateMachine[routing.BootstrapEvent, routing.BootstrapState]
 
 	// include is the inclusion state machine, responsible for vetting nodes before including them in the routing table
+	// it must only be accessed while performMu is held
 	include coordt.StateMachine[routing.IncludeEvent, routing.IncludeState]
 
 	// probe is the node probing state machine, responsible for periodically checking connectivity of nodes in the routing table
+	// it must only be accessed while performMu is held
 	probe coordt.StateMachine[routing.ProbeEvent, routing.ProbeState]
 
 	// explore is the routing table explore state machine, responsible for increasing the occupant of the routing table
+	// it must only be accessed while performMu is held
 	explore coordt.StateMachine[routing.ExploreEvent, routing.ExploreState]
 
 	// crawl is the state machine that can crawl the network from a set of seed nodes
+	// it must only be accessed while performMu is held
 	crawl coordt.StateMachine[routing.CrawlEvent, routing.CrawlState]
 
-	pendingMu sync.Mutex
-	pending   []BehaviourEvent
-	ready     chan struct{}
+	// pendingOutbound is a queue of outbound events.
+	// it must only be accessed while performMu is held
+	pendingOutbound []BehaviourEvent
+
+	// pendingInboundMu guards access to pendingInbound
+	pendingInboundMu sync.Mutex
+
+	// pendingInbound is a queue of inbound events that are awaiting processing
+	pendingInbound []CtxEvent[BehaviourEvent]
+
+	ready chan struct{}
 }
 
 func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, kadt.PeerID], cfg *RoutingConfig) (*RoutingBehaviour, error) {
@@ -351,7 +367,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	probeCfg.Concurrency = cfg.ProbeRequestConcurrency
 	probeCfg.CheckInterval = cfg.ProbeCheckInterval
 
-	probe, err := routing.NewProbe[kadt.Key, kadt.PeerID](rt, probeCfg)
+	probe, err := routing.NewProbe[kadt.Key](rt, probeCfg)
 	if err != nil {
 		return nil, fmt.Errorf("probe: %w", err)
 	}
@@ -369,7 +385,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 		return nil, fmt.Errorf("explore schedule: %w", err)
 	}
 
-	explore, err := routing.NewExplore[kadt.Key, kadt.PeerID](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
+	explore, err := routing.NewExplore[kadt.Key](self, rt, cplutil.GenRandPeerID, schedule, exploreCfg)
 	if err != nil {
 		return nil, fmt.Errorf("explore: %w", err)
 	}
@@ -415,29 +431,110 @@ func ComposeRoutingBehaviour(
 }
 
 func (r *RoutingBehaviour) Notify(ctx context.Context, ev BehaviourEvent) {
+	r.pendingInboundMu.Lock()
+	defer r.pendingInboundMu.Unlock()
+
 	ctx, span := r.cfg.Tracer.Start(ctx, "RoutingBehaviour.Notify")
 	defer span.End()
 
-	r.pendingMu.Lock()
-	defer r.pendingMu.Unlock()
-	r.notify(ctx, ev)
+	r.pendingInbound = append(r.pendingInbound, CtxEvent[BehaviourEvent]{Ctx: ctx, Event: ev})
+
+	select {
+	case r.ready <- struct{}{}:
+	default:
+	}
 }
 
-// notify must only be called while r.pendingMu is held
-func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
-	ctx, span := r.cfg.Tracer.Start(ctx, "RoutingBehaviour.notify", trace.WithAttributes(tele.AttrInEvent(ev)))
+func (r *RoutingBehaviour) Ready() <-chan struct{} {
+	return r.ready
+}
+
+func (r *RoutingBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
+	r.performMu.Lock()
+	defer r.performMu.Unlock()
+
+	ctx, span := r.cfg.Tracer.Start(ctx, "RoutingBehaviour.Perform")
 	defer span.End()
 
-	switch ev := ev.(type) {
+	defer r.updateReadyStatus()
+
+	// drain queued events first.
+	// drain queued outbound events before starting new work.
+	ev, ok := r.nextPendingOutbound()
+	if ok {
+		return ev, true
+	}
+
+	// perform one piece of pending inbound work.
+	ev, ok = r.perfomNextInbound()
+	if ok {
+		return ev, true
+	}
+
+	// poll the child state machines in priority order to give each an opportunity to perform work
+	r.pollChildren(ctx)
+
+	// finally check if any pending events were accumulated in the meantime
+	return r.nextPendingOutbound()
+}
+
+func (r *RoutingBehaviour) nextPendingOutbound() (BehaviourEvent, bool) {
+	if len(r.pendingOutbound) == 0 {
+		return nil, false
+	}
+	var ev BehaviourEvent
+	ev, r.pendingOutbound = r.pendingOutbound[0], r.pendingOutbound[1:]
+	return ev, true
+}
+
+func (r *RoutingBehaviour) updateReadyStatus() {
+	if len(r.pendingOutbound) != 0 {
+		select {
+		case r.ready <- struct{}{}:
+		default:
+		}
+		return
+	}
+
+	r.pendingInboundMu.Lock()
+	hasPendingInbound := len(r.pendingInbound) != 0
+	r.pendingInboundMu.Unlock()
+
+	if hasPendingInbound {
+		select {
+		case r.ready <- struct{}{}:
+		default:
+		}
+		return
+	}
+}
+
+func (r *RoutingBehaviour) nextPendingInbound() (CtxEvent[BehaviourEvent], bool) {
+	r.pendingInboundMu.Lock()
+	defer r.pendingInboundMu.Unlock()
+	if len(r.pendingInbound) == 0 {
+		return CtxEvent[BehaviourEvent]{}, false
+	}
+	var pev CtxEvent[BehaviourEvent]
+	pev, r.pendingInbound = r.pendingInbound[0], r.pendingInbound[1:]
+	return pev, true
+}
+
+func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
+	pev, ok := r.nextPendingInbound()
+	if !ok {
+		return nil, false
+	}
+	ctx, span := r.cfg.Tracer.Start(pev.Ctx, "PooledQueryBehaviour.perfomNextInbound", trace.WithAttributes(tele.AttrInEvent(pev)))
+	defer span.End()
+
+	switch ev := pev.Event.(type) {
 	case *EventStartBootstrap:
 		cmd := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
 			KnownClosestNodes: ev.SeedNodes,
 		}
-		// attempt to advance the bootstrap state machine
-		next, ok := r.advanceBootstrap(ctx, cmd)
-		if ok {
-			r.pending = append(r.pending, next)
-		}
+		// attempt to advance the bootstrap
+		return r.advanceBootstrap(ctx, cmd)
 
 	case *EventStartCrawl:
 		cmd := &routing.EventCrawlStart[kadt.Key, kadt.PeerID]{
@@ -446,7 +543,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		// attempt to advance the crawl state machine
 		next, ok := r.advanceCrawl(ctx, cmd)
 		if ok {
-			r.pending = append(r.pending, next)
+			r.pendingOutbound = append(r.pendingOutbound, next)
 		}
 
 	case *EventAddNode:
@@ -470,7 +567,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		// attempt to advance the include state machine
 		next, ok := r.advanceInclude(ctx, cmd)
 		if ok {
-			r.pending = append(r.pending, next)
+			r.pendingOutbound = append(r.pendingOutbound, next)
 		}
 
 	case *EventRoutingUpdated:
@@ -481,7 +578,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		// attempt to advance the probe state machine
 		next, ok := r.advanceProbe(ctx, cmd)
 		if ok {
-			r.pending = append(r.pending, next)
+			r.pendingOutbound = append(r.pendingOutbound, next)
 		}
 
 	case *EventGetCloserNodesSuccess:
@@ -490,7 +587,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		case routing.BootstrapQueryID:
 			for _, info := range ev.CloserNodes {
 				// TODO: do this after advancing bootstrap
-				r.pending = append(r.pending, &EventAddNode{
+				r.pendingOutbound = append(r.pendingOutbound, &EventAddNode{
 					NodeID: info,
 				})
 			}
@@ -501,7 +598,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the bootstrap
 			next, ok := r.advanceBootstrap(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 
 		case IncludeQueryID:
@@ -520,7 +617,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the include
 			next, ok := r.advanceInclude(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 
 		case ProbeQueryID:
@@ -539,12 +636,12 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the probe state machine
 			next, ok := r.advanceProbe(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 
 		case routing.ExploreQueryID:
 			for _, info := range ev.CloserNodes {
-				r.pending = append(r.pending, &EventAddNode{
+				r.pendingOutbound = append(r.pendingOutbound, &EventAddNode{
 					NodeID: info,
 				})
 			}
@@ -554,11 +651,11 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			}
 			next, ok := r.advanceExplore(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 
 		case routing.CrawlQueryID:
-			r.pending = append(r.pending, &EventAddNode{
+			r.pendingOutbound = append(r.pendingOutbound, &EventAddNode{
 				NodeID:  ev.To,
 				Checked: true,
 			})
@@ -572,7 +669,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the crawl
 			next, ok := r.advanceCrawl(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 
 		default:
@@ -591,7 +688,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the bootstrap
 			next, ok := r.advanceBootstrap(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 		case IncludeQueryID:
 			cmd := &routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
@@ -601,7 +698,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the include state machine
 			next, ok := r.advanceInclude(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 		case ProbeQueryID:
 			cmd := &routing.EventProbeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{
@@ -611,7 +708,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the probe state machine
 			next, ok := r.advanceProbe(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 		case routing.ExploreQueryID:
 			cmd := &routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID]{
@@ -621,7 +718,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the explore
 			next, ok := r.advanceExplore(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 		case routing.CrawlQueryID:
 			cmd := &routing.EventCrawlNodeFailure[kadt.Key, kadt.PeerID]{
@@ -632,7 +729,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 			// attempt to advance the crawl
 			next, ok := r.advanceCrawl(ctx, cmd)
 			if ok {
-				r.pending = append(r.pending, next)
+				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 
 		default:
@@ -653,7 +750,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		}
 		next, ok := r.advanceInclude(ctx, cmd)
 		if ok {
-			r.pending = append(r.pending, next)
+			r.pendingOutbound = append(r.pendingOutbound, next)
 		}
 
 		// tell the probe state machine in case there are connectivity checks that could be satisfied
@@ -662,7 +759,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		}
 		nextProbe, ok := r.advanceProbe(ctx, cmdProbe)
 		if ok {
-			r.pending = append(r.pending, nextProbe)
+			r.pendingOutbound = append(r.pendingOutbound, nextProbe)
 		}
 
 	case *EventNotifyNonConnectivity:
@@ -674,7 +771,7 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		}
 		nextProbe, ok := r.advanceProbe(ctx, cmdProbe)
 		if ok {
-			r.pending = append(r.pending, nextProbe)
+			r.pendingOutbound = append(r.pendingOutbound, nextProbe)
 		}
 
 	case *EventRoutingPoll:
@@ -684,76 +781,34 @@ func (r *RoutingBehaviour) notify(ctx context.Context, ev BehaviourEvent) {
 		panic(fmt.Sprintf("unexpected dht event: %T", ev))
 	}
 
-	if len(r.pending) > 0 {
-		select {
-		case r.ready <- struct{}{}:
-		default:
-		}
-	}
-}
-
-func (r *RoutingBehaviour) Ready() <-chan struct{} {
-	return r.ready
-}
-
-func (r *RoutingBehaviour) Perform(ctx context.Context) (BehaviourEvent, bool) {
-	ctx, span := r.cfg.Tracer.Start(ctx, "RoutingBehaviour.Perform")
-	defer span.End()
-
-	// No inbound work can be done until Perform is complete
-	r.pendingMu.Lock()
-	defer r.pendingMu.Unlock()
-
-	for {
-		// drain queued events first.
-		if len(r.pending) > 0 {
-			var ev BehaviourEvent
-			ev, r.pending = r.pending[0], r.pending[1:]
-
-			if len(r.pending) > 0 {
-				select {
-				case r.ready <- struct{}{}:
-				default:
-				}
-			}
-			return ev, true
-		}
-
-		// poll the child state machines in priority order to give each an opportunity to perform work
-		r.pollChildren(ctx)
-
-		// finally check if any pending events were accumulated in the meantime
-		if len(r.pending) == 0 {
-			return nil, false
-		}
-	}
+	return nil, false
 }
 
 // pollChildren must only be called while r.pendingMu is locked
 func (r *RoutingBehaviour) pollChildren(ctx context.Context) {
 	ev, ok := r.advanceBootstrap(ctx, &routing.EventBootstrapPoll{})
 	if ok {
-		r.pending = append(r.pending, ev)
+		r.pendingOutbound = append(r.pendingOutbound, ev)
 	}
 
 	ev, ok = r.advanceInclude(ctx, &routing.EventIncludePoll{})
 	if ok {
-		r.pending = append(r.pending, ev)
+		r.pendingOutbound = append(r.pendingOutbound, ev)
 	}
 
 	ev, ok = r.advanceProbe(ctx, &routing.EventProbePoll{})
 	if ok {
-		r.pending = append(r.pending, ev)
+		r.pendingOutbound = append(r.pendingOutbound, ev)
 	}
 
 	ev, ok = r.advanceExplore(ctx, &routing.EventExplorePoll{})
 	if ok {
-		r.pending = append(r.pending, ev)
+		r.pendingOutbound = append(r.pendingOutbound, ev)
 	}
 
 	ev, ok = r.advanceCrawl(ctx, &routing.EventCrawlPoll{})
 	if ok {
-		r.pending = append(r.pending, ev)
+		r.pendingOutbound = append(r.pendingOutbound, ev)
 	}
 }
 
@@ -808,7 +863,7 @@ func (r *RoutingBehaviour) advanceInclude(ctx context.Context, ev routing.Includ
 		// a node has been included in the routing table
 
 		// notify other routing state machines that there is a new node in the routing table
-		r.notify(ctx, &EventRoutingUpdated{
+		r.Notify(ctx, &EventRoutingUpdated{
 			NodeID: st.NodeID,
 		})
 
@@ -852,14 +907,15 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 
 		// emit an EventRoutingRemoved event to notify clients that the node has been removed
 		r.cfg.Logger.Debug("peer removed from routing table", tele.LogAttrPeerID(st.NodeID))
-		r.pending = append(r.pending, &EventRoutingRemoved{
+		r.pendingOutbound = append(r.pendingOutbound, &EventRoutingRemoved{
 			NodeID: st.NodeID,
 		})
 
 		// add the node to the inclusion list for a second chance
-		r.notify(ctx, &EventAddNode{
+		r.Notify(ctx, &EventAddNode{
 			NodeID: st.NodeID,
 		})
+
 	case *routing.StateProbeWaitingAtCapacity:
 		// the probe state machine is waiting for responses for checks and the maximum number of concurrent checks has been reached.
 		// nothing to do except wait for message response or timeout

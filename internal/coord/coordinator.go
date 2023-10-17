@@ -96,7 +96,7 @@ type CoordinatorConfig struct {
 	Routing RoutingConfig
 
 	// Query is the configuration used for the [PooledQueryBehaviour] which manages the execution of user queries.
-	Query PooledQueryConfig
+	Query QueryConfig
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -141,7 +141,7 @@ func DefaultCoordinatorConfig() *CoordinatorConfig {
 		TracerProvider: otel.GetTracerProvider(),
 	}
 
-	cfg.Query = *DefaultPooledQueryConfig()
+	cfg.Query = *DefaultQueryConfig()
 	cfg.Query.Clock = cfg.Clock
 	cfg.Query.Logger = cfg.Logger.With("behaviour", "pooledquery")
 	cfg.Query.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
@@ -168,7 +168,7 @@ func NewCoordinator(self kadt.PeerID, rtr coordt.Router[kadt.Key, kadt.PeerID, *
 		return nil, fmt.Errorf("init telemetry: %w", err)
 	}
 
-	queryBehaviour, err := NewPooledQueryBehaviour(self, &cfg.Query)
+	queryBehaviour, err := NewQueryBehaviour(self, &cfg.Query)
 	if err != nil {
 		return nil, fmt.Errorf("query behaviour: %w", err)
 	}

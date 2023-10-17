@@ -238,12 +238,13 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// the event that should be passed to the bootstrap state machine
 	expected := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
 		KnownClosestNodes: ev.SeedNodes,
 	}
-	require.Equal(t, expected, bootstrap.Received)
+	require.Equal(t, expected, bootstrap.first())
 }
 
 func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
@@ -271,11 +272,12 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID]{}, bootstrap.first())
 
-	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID])
+	rev := bootstrap.first().(*routing.EventBootstrapFindCloserResponse[kadt.Key, kadt.PeerID])
 	require.True(t, nodes[1].NodeID.Equal(rev.NodeID))
 	require.Equal(t, ev.CloserNodes, rev.CloserNodes)
 }
@@ -306,11 +308,12 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID]{}, bootstrap.Received)
+	require.IsType(t, &routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID]{}, bootstrap.first())
 
-	rev := bootstrap.Received.(*routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID])
+	rev := bootstrap.first().(*routing.EventBootstrapFindCloserFailure[kadt.Key, kadt.PeerID])
 	require.Equal(t, peer.ID(nodes[1].NodeID), peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
@@ -337,12 +340,13 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// the event that should be passed to the include state machine
 	expected := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
 		NodeID: ev.NodeID,
 	}
-	require.Equal(t, expected, include.Received)
+	require.Equal(t, expected, include.first())
 }
 
 func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
@@ -370,11 +374,12 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeConnectivityCheckSuccess[kadt.Key, kadt.PeerID]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckSuccess[kadt.Key, kadt.PeerID]{}, include.first())
 
-	rev := include.Received.(*routing.EventIncludeConnectivityCheckSuccess[kadt.Key, kadt.PeerID])
+	rev := include.first().(*routing.EventIncludeConnectivityCheckSuccess[kadt.Key, kadt.PeerID])
 	require.Equal(t, peer.ID(nodes[1].NodeID), peer.ID(rev.NodeID))
 }
 
@@ -404,11 +409,12 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// include should receive message response event
-	require.IsType(t, &routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{}, include.Received)
+	require.IsType(t, &routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID]{}, include.first())
 
-	rev := include.Received.(*routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID])
+	rev := include.first().(*routing.EventIncludeConnectivityCheckFailure[kadt.Key, kadt.PeerID])
 	require.Equal(t, peer.ID(nodes[1].NodeID), peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
@@ -470,20 +476,23 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 		Target:      oev.Target,
 		CloserNodes: []kadt.PeerID{nodes[1].NodeID}, // must include one for include check to pass
 	})
+	dev, ok = routingBehaviour.Perform(ctx)
 
 	// the routing table should now contain the node
 	_, intable = rt.GetNode(candidate.Key())
 	require.True(t, intable)
 
 	// routing update event should be emitted from the include state machine
-	dev, ok = routingBehaviour.Perform(ctx)
 	require.True(t, ok)
 	require.IsType(t, &EventRoutingUpdated{}, dev)
+
+	// drain any pending work
+	DrainBehaviour[BehaviourEvent, BehaviourEvent](t, ctx, routingBehaviour)
 
 	// advance time past the probe check interval
 	clk.Add(probeCfg.CheckInterval)
 
-	// routing update event should be emitted from the include state machine
+	// probe should be sent for the node
 	dev, ok = routingBehaviour.Perform(ctx)
 	require.True(t, ok)
 	require.IsType(t, &EventOutboundGetCloserNodes{}, dev)
@@ -558,11 +567,12 @@ func TestRoutingExploreGetClosestNodesSuccess(t *testing.T) {
 		CloserNodes: []kadt.PeerID{nodes[2].NodeID},
 	}
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// explore should receive message response event
-	require.IsType(t, &routing.EventExploreFindCloserResponse[kadt.Key, kadt.PeerID]{}, explore.Received)
+	require.IsType(t, &routing.EventExploreFindCloserResponse[kadt.Key, kadt.PeerID]{}, explore.first())
 
-	rev := explore.Received.(*routing.EventExploreFindCloserResponse[kadt.Key, kadt.PeerID])
+	rev := explore.first().(*routing.EventExploreFindCloserResponse[kadt.Key, kadt.PeerID])
 	require.True(t, nodes[1].NodeID.Equal(rev.NodeID))
 	require.Equal(t, ev.CloserNodes, rev.CloserNodes)
 }
@@ -593,11 +603,12 @@ func TestRoutingExploreGetClosestNodesFailure(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// bootstrap should receive message response event
-	require.IsType(t, &routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID]{}, explore.Received)
+	require.IsType(t, &routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID]{}, explore.first())
 
-	rev := explore.Received.(*routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID])
+	rev := explore.first().(*routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID])
 	require.Equal(t, peer.ID(nodes[1].NodeID), peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
 }
