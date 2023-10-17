@@ -307,8 +307,7 @@ func (f *FullRT) PutValue(ctx context.Context, keyStr string, value []byte, opts
 		return nil
 	}
 
-	// construct Kademlia-key. Yes, we hash the complete key string which
-	// includes the namespace prefix.
+	// construct message that we will send to other peer
 	msg := &pb.Message{
 		Type:   pb.Message_PUT_VALUE,
 		Key:    []byte(keyStr),
@@ -569,38 +568,55 @@ func (f *FullRT) ProvideMany(ctx context.Context, mhashes []mh.Multihash) error 
 		keys = append(keys, kadt.NewKey(mhash))
 	}
 
-	// TODO: get seed set of peers
-	return f.kad.BroadcastMany(ctx, keys, nil, msgFn)
+	return f.kad.BroadcastMany(ctx, keys, msgFn)
 }
 
-//func (f *FullRT) PutMany(ctx context.Context, keys []string, values [][]byte) error {
-//	_, span := f.tele.Tracer.Start(ctx, "FullRT.PutMany")
-//	defer span.End()
-//
-//
-//	if !dht.enableValues {
-//		return routing.ErrNotSupported
-//	}
-//
-//	if len(keys) != len(values) {
-//		return fmt.Errorf("number of keys does not match the number of values")
-//	}
-//
-//	keysAsPeerIDs := make([]peer.ID, 0, len(keys))
-//	keyRecMap := make(map[string][]byte)
-//	for i, k := range keys {
-//		keysAsPeerIDs = append(keysAsPeerIDs, peer.ID(k))
-//		keyRecMap[k] = values[i]
-//	}
-//
-//	if len(keys) != len(keyRecMap) {
-//		return fmt.Errorf("does not support duplicate keys")
-//	}
-//
-//	fn := func(ctx context.Context, p, k peer.ID) error {
-//		keyStr := string(k)
-//		return dht.protoMessenger.PutValue(ctx, p, record.MakePutRecord(keyStr, keyRecMap[keyStr]))
-//	}
-//
-//	return dht.bulkMessageSend(ctx, keysAsPeerIDs, fn, false)
-//}
+func (f *FullRT) PutMany(ctx context.Context, keySlice []string, valueSlice [][]byte) error {
+	_, span := f.tele.Tracer.Start(ctx, "FullRT.PutMany")
+	defer span.End()
+
+	if len(keySlice) == 0 {
+		return fmt.Errorf("no keys")
+	}
+
+	ns, _, err := record.SplitKey(keySlice[0])
+	if err != nil {
+		return fmt.Errorf("splitting key: %w", err)
+	}
+
+	_, found := f.backends[ns]
+	if !found {
+		return routing.ErrNotSupported
+	}
+
+	if len(keySlice) != len(valueSlice) {
+		return fmt.Errorf("number of keys does not match the number of values")
+	}
+
+	kadKeys := make([]kadt.Key, 0, len(keySlice))
+	valueMap := make(map[string][]byte, len(valueSlice))
+	for i, preimage := range keySlice {
+		valueMap[preimage] = valueSlice[i]
+		kadKeys = append(kadKeys, kadt.NewKey([]byte(preimage)))
+	}
+
+	// Compute addresses once for all provides
+	self := peer.AddrInfo{
+		ID:    f.host.ID(),
+		Addrs: f.host.Addrs(),
+	}
+	if len(self.Addrs) < 1 {
+		return fmt.Errorf("no known addresses for self, cannot put provider")
+	}
+
+	msgFn := func(k kadt.Key) *pb.Message {
+		strKey := string(k.MsgKey())
+		return &pb.Message{
+			Type:   pb.Message_PUT_VALUE,
+			Key:    k.MsgKey(),
+			Record: record.MakePutRecord(strKey, valueMap[strKey]),
+		}
+	}
+
+	return f.kad.BroadcastMany(ctx, kadKeys, msgFn)
+}
