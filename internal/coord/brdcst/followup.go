@@ -12,6 +12,25 @@ import (
 	"github.com/plprobelab/zikade/tele"
 )
 
+// ConfigFollowUp specifies the configuration for the [FollowUp] state machine.
+type ConfigFollowUp[K kad.Key[K]] struct {
+	Target K
+}
+
+// Validate checks the configuration options and returns an error if any have
+// invalid values.
+func (c *ConfigFollowUp[K]) Validate() error {
+	return nil
+}
+
+// DefaultConfigFollowUp returns the default configuration options for the
+// [FollowUp] state machine.
+func DefaultConfigFollowUp[K kad.Key[K]](target K) *ConfigFollowUp[K] {
+	return &ConfigFollowUp[K]{
+		Target: target,
+	}
+}
+
 // FollowUp is a [Broadcast] state machine and encapsulates the logic around
 // doing a "classic" put operation. This mimics the algorithm employed in the
 // original go-libp2p-kad-dht v1 code base. It first queries the closest nodes

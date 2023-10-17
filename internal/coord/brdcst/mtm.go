@@ -14,6 +14,33 @@ import (
 	"github.com/plprobelab/zikade/tele"
 )
 
+// ConfigManyToMany specifies the configuration for the [ManyToMany] state
+// machine.
+type ConfigManyToMany[K kad.Key[K]] struct {
+	NodeConcurrency   int
+	StreamConcurrency int
+	Targets           []K
+}
+
+// Validate checks the configuration options and returns an error if any have
+// invalid values.
+func (c *ConfigManyToMany[K]) Validate() error {
+	if len(c.Targets) == 0 {
+		return fmt.Errorf("targets must not be empty")
+	}
+	return nil
+}
+
+// DefaultConfigManyToMany returns the default configuration options for the
+// [ManyToMany] state machine.
+func DefaultConfigManyToMany[K kad.Key[K]](targets []K) *ConfigManyToMany[K] {
+	return &ConfigManyToMany[K]{
+		NodeConcurrency:   100, // MAGIC
+		StreamConcurrency: 10,  // MAGIC
+		Targets:           targets,
+	}
+}
+
 // ManyToMany is a [Broadcast] state machine and encapsulates the logic around
 // doing a put operation to a static set of nodes. That static set of nodes
 // is given by the list of seed nodes in the [EventBroadcastStart] event.

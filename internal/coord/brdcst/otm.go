@@ -12,6 +12,26 @@ import (
 	"github.com/plprobelab/zikade/tele"
 )
 
+// ConfigOneToMany specifies the configuration for the [OneToMany] state
+// machine.
+type ConfigOneToMany[K kad.Key[K]] struct {
+	Target K
+}
+
+// Validate checks the configuration options and returns an error if any have
+// invalid values.
+func (c *ConfigOneToMany[K]) Validate() error {
+	return nil
+}
+
+// DefaultConfigOneToMany returns the default configuration options for the
+// [OneToMany] state machine.
+func DefaultConfigOneToMany[K kad.Key[K]](target K) *ConfigOneToMany[K] {
+	return &ConfigOneToMany[K]{
+		Target: target,
+	}
+}
+
 // OneToMany is a [Broadcast] state machine and encapsulates the logic around
 // doing a ONE put operation to MANY preconfigured nodes. That static set of
 // nodes is given by the list of seed nodes in the [EventBroadcastStart] event.

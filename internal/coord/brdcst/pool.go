@@ -17,6 +17,29 @@ import (
 // are the [FollowUp] and [Static] state machines.
 type Broadcast = coordt.StateMachine[BroadcastEvent, BroadcastState]
 
+// ConfigPool specifies the configuration for a broadcast [Pool].
+type ConfigPool struct {
+	pCfg *query.PoolConfig
+}
+
+// Validate checks the configuration options and returns an error if any have
+// invalid values.
+func (cfg *ConfigPool) Validate() error {
+	if cfg.pCfg == nil {
+		return fmt.Errorf("query pool config must not be nil")
+	}
+
+	return nil
+}
+
+// DefaultConfigPool returns the default configuration options for a Pool.
+// Options may be overridden before passing to NewPool
+func DefaultConfigPool() *ConfigPool {
+	return &ConfigPool{
+		pCfg: query.DefaultPoolConfig(),
+	}
+}
+
 // Pool is a [coordt.StateMachine] that manages all running broadcast
 // operations. In the future it could limit the number of concurrent operations,
 // but right now it is just keeping track of all running broadcasts. The

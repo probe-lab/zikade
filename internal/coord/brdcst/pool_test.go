@@ -15,6 +15,30 @@ import (
 // Assert that Pool implements the common state machine interface
 var _ coordt.StateMachine[PoolEvent, PoolState] = (*Pool[tiny.Key, tiny.Node, tiny.Message])(nil)
 
+func TestConfigPool_Validate(t *testing.T) {
+	t.Run("default is valid", func(t *testing.T) {
+		cfg := DefaultConfigPool()
+		require.NoError(t, cfg.Validate())
+	})
+
+	t.Run("nil pool config", func(t *testing.T) {
+		cfg := DefaultConfigPool()
+		cfg.pCfg = nil
+		require.Error(t, cfg.Validate())
+	})
+}
+
+func TestConfig_interface_conformance(t *testing.T) {
+	configs := []Config{
+		&ConfigFollowUp[tiny.Key]{},
+		&ConfigOneToMany[tiny.Key]{},
+		&ConfigManyToMany[tiny.Key]{},
+	}
+	for _, c := range configs {
+		c.broadcastConfig() // drives test coverage
+	}
+}
+
 func TestPoolStopWhenNoQueries(t *testing.T) {
 	ctx := context.Background()
 	cfg := DefaultConfigPool()
