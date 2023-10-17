@@ -635,10 +635,11 @@ func TestRoutingStartCrawlSendsEvent(t *testing.T) {
 	}
 
 	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
 
 	// the event that should be passed to the bootstrap state machine
 	expected := &routing.EventCrawlStart[kadt.Key, kadt.PeerID]{
 		Seed: ev.Seed,
 	}
-	require.Equal(t, expected, crawl.Received)
+	require.Equal(t, expected, crawl.first())
 }
