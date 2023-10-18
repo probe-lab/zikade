@@ -520,7 +520,7 @@ func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWai
 
 		case wev, more := <-waiter.Progressed():
 			if !more {
-				return nil, nil, ctx.Err()
+				continue
 			}
 			fn(wev.Ctx, wev.Event.NodeID, wev.Event.Response)
 
