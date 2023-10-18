@@ -9,6 +9,7 @@ import (
 	"github.com/plprobelab/go-libdht/kad/key"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 
 	"github.com/plprobelab/zikade/errs"
 	"github.com/plprobelab/zikade/internal/coord/coordt"
@@ -24,6 +25,7 @@ type CrawlConfig struct {
 	Interval    time.Duration // the interval in which the network should be crawled (0 means no crawling)
 	Concurrency int           // the maximum number of concurrent peers that we may query
 	Tracer      trace.Tracer  // Tracer is the tracer that should be used to trace execution.
+	Logger      *slog.Logger  // Logger is a structured logger that will be used when logging.
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -66,6 +68,7 @@ func DefaultCrawlConfig() *CrawlConfig {
 		MaxCPL:      16,
 		Concurrency: 200,
 		Tracer:      tele.NoopTracer(),
+		Logger:      tele.DefaultLogger("routing"),
 	}
 }
 
@@ -146,7 +149,7 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 					node:   node,
 					target: target.Key(),
 				}
-
+				c.cfg.Logger.Debug("creating crawl job", "node", node.String(), "cpl", j, "key", key.HexString(job.target))
 				ci.cpls[job.mapKey()] = j
 				ci.todo = append(ci.todo, job)
 			}
@@ -165,6 +168,7 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 			node:   tev.NodeID,
 			target: tev.Target,
 		}
+		c.cfg.Logger.Debug("received response for crawl job", "node", job.node.String(), "key", key.HexString(job.target))
 
 		mapKey := job.mapKey()
 		if _, found := c.info.waiting[mapKey]; !found {
@@ -192,6 +196,7 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 					continue
 				}
 
+				c.cfg.Logger.Debug("creating crawl job", "node", node.String(), "cpl", i, "key", key.HexString(newJob.target))
 				c.info.cpls[newMapKey] = i
 				c.info.todo = append(c.info.todo, newJob)
 			}
@@ -206,6 +211,7 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 			node:   tev.NodeID,
 			target: tev.Target,
 		}
+		c.cfg.Logger.Debug("received failure for crawl job", "node", job.node.String(), "key", key.HexString(job.target), "error", tev.Error)
 
 		mapKey := job.mapKey()
 		if _, found := c.info.waiting[mapKey]; !found {
@@ -236,6 +242,7 @@ func (c *Crawl[K, N]) Advance(ctx context.Context, ev CrawlEvent) (out CrawlStat
 		// pop next crawl job from queue
 		var job crawlJob[K, N]
 		job, c.info.todo = c.info.todo[0], c.info.todo[1:]
+		c.cfg.Logger.Debug("starting crawl job", "node", job.node.String(), "key", key.HexString(job.target))
 
 		// mark the job as waiting
 		mapKey := job.mapKey()

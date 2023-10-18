@@ -11,6 +11,7 @@ import (
 	"github.com/plprobelab/go-libdht/kad/key"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 
 	"github.com/plprobelab/zikade/errs"
 	"github.com/plprobelab/zikade/tele"
@@ -64,6 +65,9 @@ type IncludeConfig struct {
 
 	// Tracer is the tracer that should be used to trace execution.
 	Tracer trace.Tracer
+
+	// Logger is a structured logger that will be used when logging.
+	Logger *slog.Logger
 
 	// Meter is the meter that should be used to record metrics.
 	Meter metric.Meter
@@ -123,6 +127,7 @@ func DefaultIncludeConfig() *IncludeConfig {
 		Clock:  clock.New(), // use standard time
 		Tracer: tele.NoopTracer(),
 		Meter:  tele.NoopMeter(),
+		Logger: tele.DefaultLogger("routing"),
 
 		Concurrency:   3,
 		Timeout:       time.Minute,
@@ -225,6 +230,7 @@ func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out Incl
 	case *EventIncludeNode[K, N]:
 		delete(in.checks, key.HexString(tev.NodeID.Key()))
 		if in.rt.AddNode(tev.NodeID) {
+			in.cfg.Logger.Debug("node directly added to routing table", "node", tev.NodeID)
 			return &StateIncludeRoutingUpdated[K, N]{
 				NodeID: tev.NodeID,
 			}
@@ -240,6 +246,7 @@ func (in *Include[K, N]) Advance(ctx context.Context, ev IncludeEvent) (out Incl
 		if ok {
 			delete(in.checks, key.HexString(tev.NodeID.Key()))
 			if in.rt.AddNode(tev.NodeID) {
+				in.cfg.Logger.Debug("node added to routing table after successful check", "node", tev.NodeID)
 				return &StateIncludeRoutingUpdated[K, N]{
 					NodeID: ch.NodeID,
 				}

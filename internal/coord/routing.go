@@ -350,6 +350,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	includeCfg.Clock = cfg.Clock
 	includeCfg.Tracer = cfg.Tracer
 	includeCfg.Meter = cfg.Meter
+	includeCfg.Logger = cfg.Logger.With("statemachine", "include")
 	includeCfg.Timeout = cfg.ConnectivityCheckTimeout
 	includeCfg.QueueCapacity = cfg.IncludeQueueCapacity
 	includeCfg.Concurrency = cfg.IncludeRequestConcurrency
@@ -391,6 +392,8 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	}
 
 	crawlCfg := routing.DefaultCrawlConfig()
+	crawlCfg.Tracer = cfg.Tracer
+	crawlCfg.Logger = cfg.Logger.With("statemachine", "crawl")
 
 	crawl, err := routing.NewCrawl(self, cplutil.GenRandPeerID, crawlCfg)
 	if err != nil {
