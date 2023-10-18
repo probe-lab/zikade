@@ -305,9 +305,13 @@ type RoutingBehaviour struct {
 	// it must only be accessed while performMu is held
 	probe coordt.StateMachine[routing.ProbeEvent, routing.ProbeState]
 
-	// explore is the routing table explore state machine, responsible for increasing the occupanct of the routing table
+	// explore is the routing table explore state machine, responsible for increasing the occupant of the routing table
 	// it must only be accessed while performMu is held
 	explore coordt.StateMachine[routing.ExploreEvent, routing.ExploreState]
+
+	// crawl is the state machine that can crawl the network from a set of seed nodes
+	// it must only be accessed while performMu is held
+	crawl coordt.StateMachine[routing.CrawlEvent, routing.CrawlState]
 
 	// pendingOutbound is a queue of outbound events.
 	// it must only be accessed while performMu is held
@@ -346,6 +350,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	includeCfg.Clock = cfg.Clock
 	includeCfg.Tracer = cfg.Tracer
 	includeCfg.Meter = cfg.Meter
+	includeCfg.Logger = cfg.Logger.With("statemachine", "include")
 	includeCfg.Timeout = cfg.ConnectivityCheckTimeout
 	includeCfg.QueueCapacity = cfg.IncludeQueueCapacity
 	includeCfg.Concurrency = cfg.IncludeRequestConcurrency
@@ -386,7 +391,16 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 		return nil, fmt.Errorf("explore: %w", err)
 	}
 
-	return ComposeRoutingBehaviour(self, bootstrap, include, probe, explore, cfg)
+	crawlCfg := routing.DefaultCrawlConfig()
+	crawlCfg.Tracer = cfg.Tracer
+	crawlCfg.Logger = cfg.Logger.With("statemachine", "crawl")
+
+	crawl, err := routing.NewCrawl(self, cplutil.GenRandPeerID, crawlCfg)
+	if err != nil {
+		return nil, fmt.Errorf("crawl: %w", err)
+	}
+
+	return ComposeRoutingBehaviour(self, bootstrap, include, probe, explore, crawl, cfg)
 }
 
 // ComposeRoutingBehaviour creates a [RoutingBehaviour] composed of the supplied state machines.
@@ -397,6 +411,7 @@ func ComposeRoutingBehaviour(
 	include coordt.StateMachine[routing.IncludeEvent, routing.IncludeState],
 	probe coordt.StateMachine[routing.ProbeEvent, routing.ProbeState],
 	explore coordt.StateMachine[routing.ExploreEvent, routing.ExploreState],
+	crawl coordt.StateMachine[routing.CrawlEvent, routing.CrawlState],
 	cfg *RoutingConfig,
 ) (*RoutingBehaviour, error) {
 	if cfg == nil {
@@ -412,6 +427,7 @@ func ComposeRoutingBehaviour(
 		include:   include,
 		probe:     probe,
 		explore:   explore,
+		crawl:     crawl,
 		ready:     make(chan struct{}, 1),
 	}
 	return r, nil
@@ -512,36 +528,52 @@ func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
 	if !ok {
 		return nil, false
 	}
-
-	ctx, span := r.cfg.Tracer.Start(pev.Ctx, "PooledQueryBehaviour.perfomNextInbound")
+	ctx, span := r.cfg.Tracer.Start(pev.Ctx, "PooledQueryBehaviour.perfomNextInbound", trace.WithAttributes(tele.AttrInEvent(pev)))
 	defer span.End()
 
 	switch ev := pev.Event.(type) {
 	case *EventStartBootstrap:
-		span.SetAttributes(attribute.String("event", "EventStartBootstrap"))
 		cmd := &routing.EventBootstrapStart[kadt.Key, kadt.PeerID]{
 			KnownClosestNodes: ev.SeedNodes,
 		}
 		// attempt to advance the bootstrap
 		return r.advanceBootstrap(ctx, cmd)
 
+	case *EventStartCrawl:
+		cmd := &routing.EventCrawlStart[kadt.Key, kadt.PeerID]{
+			Seed: ev.Seed,
+		}
+		// attempt to advance the crawl state machine
+		next, ok := r.advanceCrawl(ctx, cmd)
+		if ok {
+			r.pendingOutbound = append(r.pendingOutbound, next)
+		}
+
 	case *EventAddNode:
-		span.SetAttributes(attribute.String("event", "EventAddAddrInfo"))
 		// Ignore self
 		if r.self.Equal(ev.NodeID) {
 			break
 		}
-		cmd := &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
-			NodeID: ev.NodeID,
+
+		var cmd routing.IncludeEvent
+		if ev.Checked {
+			cmd = &routing.EventIncludeNode[kadt.Key, kadt.PeerID]{
+				NodeID: ev.NodeID,
+			}
+		} else {
+			cmd = &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
+				NodeID: ev.NodeID,
+			}
 		}
-		// attempt to advance the include
+
+		// attempt to advance the include state machine
 		next, ok := r.advanceInclude(ctx, cmd)
 		if ok {
 			r.pendingOutbound = append(r.pendingOutbound, next)
 		}
 
 	case *EventRoutingUpdated:
-		span.SetAttributes(attribute.String("event", "EventRoutingUpdated"), attribute.String("nodeid", ev.NodeID.String()))
+		span.SetAttributes(attribute.String("nodeid", ev.NodeID.String()))
 		cmd := &routing.EventProbeAdd[kadt.Key, kadt.PeerID]{
 			NodeID: ev.NodeID,
 		}
@@ -624,9 +656,28 @@ func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
 				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
 
+		case routing.CrawlQueryID:
+			r.pendingOutbound = append(r.pendingOutbound, &EventAddNode{
+				NodeID:  ev.To,
+				Checked: true,
+			})
+
+			cmd := &routing.EventCrawlNodeResponse[kadt.Key, kadt.PeerID]{
+				NodeID:      ev.To,
+				Target:      ev.Target,
+				CloserNodes: ev.CloserNodes,
+			}
+
+			// attempt to advance the crawl
+			next, ok := r.advanceCrawl(ctx, cmd)
+			if ok {
+				r.pendingOutbound = append(r.pendingOutbound, next)
+			}
+
 		default:
 			panic(fmt.Sprintf("unexpected query id: %s", ev.QueryID))
 		}
+
 	case *EventGetCloserNodesFailure:
 		span.SetAttributes(attribute.String("event", "EventGetCloserNodesFailure"), attribute.String("queryid", string(ev.QueryID)), attribute.String("nodeid", ev.To.String()))
 		span.RecordError(ev.Err)
@@ -671,10 +722,22 @@ func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
 			if ok {
 				r.pendingOutbound = append(r.pendingOutbound, next)
 			}
+		case routing.CrawlQueryID:
+			cmd := &routing.EventCrawlNodeFailure[kadt.Key, kadt.PeerID]{
+				NodeID: ev.To,
+				Target: ev.Target,
+				Error:  ev.Err,
+			}
+			// attempt to advance the crawl
+			next, ok := r.advanceCrawl(ctx, cmd)
+			if ok {
+				r.pendingOutbound = append(r.pendingOutbound, next)
+			}
 
 		default:
 			panic(fmt.Sprintf("unexpected query id: %s", ev.QueryID))
 		}
+
 	case *EventNotifyConnectivity:
 		span.SetAttributes(attribute.String("event", "EventNotifyConnectivity"), attribute.String("nodeid", ev.NodeID.String()))
 		// ignore self
@@ -692,7 +755,7 @@ func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
 			r.pendingOutbound = append(r.pendingOutbound, next)
 		}
 
-		// tell the probe state machine in case there is are connectivity checks that could satisfied
+		// tell the probe state machine in case there are connectivity checks that could be satisfied
 		cmdProbe := &routing.EventProbeNotifyConnectivity[kadt.Key, kadt.PeerID]{
 			NodeID: ev.NodeID,
 		}
@@ -700,6 +763,7 @@ func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
 		if ok {
 			r.pendingOutbound = append(r.pendingOutbound, nextProbe)
 		}
+
 	case *EventNotifyNonConnectivity:
 		span.SetAttributes(attribute.String("event", "EventNotifyConnectivity"), attribute.String("nodeid", ev.NodeID.String()))
 
@@ -711,6 +775,7 @@ func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
 		if ok {
 			r.pendingOutbound = append(r.pendingOutbound, nextProbe)
 		}
+
 	case *EventRoutingPoll:
 		r.pollChildren(ctx)
 
@@ -739,6 +804,11 @@ func (r *RoutingBehaviour) pollChildren(ctx context.Context) {
 	}
 
 	ev, ok = r.advanceExplore(ctx, &routing.EventExplorePoll{})
+	if ok {
+		r.pendingOutbound = append(r.pendingOutbound, ev)
+	}
+
+	ev, ok = r.advanceCrawl(ctx, &routing.EventCrawlPoll{})
 	if ok {
 		r.pendingOutbound = append(r.pendingOutbound, ev)
 	}
@@ -867,9 +937,9 @@ func (r *RoutingBehaviour) advanceProbe(ctx context.Context, ev routing.ProbeEve
 func (r *RoutingBehaviour) advanceExplore(ctx context.Context, ev routing.ExploreEvent) (BehaviourEvent, bool) {
 	ctx, span := r.cfg.Tracer.Start(ctx, "RoutingBehaviour.advanceExplore")
 	defer span.End()
+
 	bstate := r.explore.Advance(ctx, ev)
 	switch st := bstate.(type) {
-
 	case *routing.StateExploreFindCloser[kadt.Key, kadt.PeerID]:
 		r.cfg.Logger.Debug("starting explore", slog.Int("cpl", st.Cpl), tele.LogAttrPeerID(st.NodeID))
 		return &EventOutboundGetCloserNodes{
@@ -888,6 +958,35 @@ func (r *RoutingBehaviour) advanceExplore(ctx context.Context, ev routing.Explor
 	case *routing.StateExploreFailure:
 		r.cfg.Logger.Warn("explore failure", slog.Int("cpl", st.Cpl), tele.LogAttrError(st.Error))
 	case *routing.StateExploreIdle:
+		// bootstrap not running, nothing to do
+	default:
+		panic(fmt.Sprintf("unexpected explore state: %T", st))
+	}
+
+	return nil, false
+}
+
+func (r *RoutingBehaviour) advanceCrawl(ctx context.Context, ev routing.CrawlEvent) (BehaviourEvent, bool) {
+	ctx, span := r.cfg.Tracer.Start(ctx, "RoutingBehaviour.advanceCrawl")
+	defer span.End()
+
+	cstate := r.crawl.Advance(ctx, ev)
+	switch st := cstate.(type) {
+	case *routing.StateCrawlFindCloser[kadt.Key, kadt.PeerID]:
+		return &EventOutboundGetCloserNodes{
+			QueryID: routing.CrawlQueryID,
+			To:      st.NodeID,
+			Target:  st.Target,
+			Notify:  r,
+		}, true
+
+	case *routing.StateCrawlWaitingWithCapacity:
+		// crawl waiting for a message response but has capacity to do more
+	case *routing.StateCrawlWaitingAtCapacity:
+		// crawl waiting for a message response but has no capacity to do more
+	case *routing.StateCrawlFinished[kadt.Key, kadt.PeerID]:
+		r.cfg.Logger.Info("crawl finished")
+	case *routing.StateCrawlIdle:
 		// bootstrap not running, nothing to do
 	default:
 		panic(fmt.Sprintf("unexpected explore state: %T", st))

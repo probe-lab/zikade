@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	mh "github.com/multiformats/go-multihash"
-
 	"github.com/plprobelab/zikade/kadt"
 )
 
@@ -25,7 +24,7 @@ func GenRandPeerID(k kadt.Key, cpl int) (kadt.PeerID, error) {
 	key := keyPrefixMap[targetPrefix]
 	id := [32 + 2]byte{mh.SHA2_256, 32}
 	binary.BigEndian.PutUint32(id[2:], key)
-	return kadt.PeerID(string(id[:])), nil
+	return kadt.PeerID(id[:]), nil
 }
 
 type keybit interface {

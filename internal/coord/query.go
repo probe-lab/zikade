@@ -39,6 +39,16 @@ type QueryConfig struct {
 
 	// RequestTimeout is the timeout queries should use for contacting a single node
 	RequestTimeout time.Duration
+
+	// NumResults specifies the number of results (nodes) we are searching for
+	NumResults int
+
+	// Strategy specifies the query strategy that should be used. By default,
+	// we are using the [query.StrategyConverge] which searches for ever
+	// closer nodes to a certain key and hence converging in the key space.
+	// Alternatively, there's also [query.StrategyStatic] which just
+	// contacts a static list of preconfigured peers.
+	Strategy query.Strategy
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -103,7 +113,8 @@ func DefaultQueryConfig() *QueryConfig {
 		Timeout:            5 * time.Minute, // MAGIC
 		RequestConcurrency: 3,               // MAGIC
 		RequestTimeout:     time.Minute,     // MAGIC
-
+		NumResults:         20,              // MAGIC
+		Strategy:           &query.StrategyConverge{},
 	}
 }
 
@@ -263,19 +274,21 @@ func (p *QueryBehaviour) perfomNextInbound(ctx context.Context) (BehaviourEvent,
 	switch ev := pev.Event.(type) {
 	case *EventStartFindCloserQuery:
 		cmd = &query.EventPoolAddFindCloserQuery[kadt.Key, kadt.PeerID]{
-			QueryID: ev.QueryID,
-			Target:  ev.Target,
-			Seed:    ev.KnownClosestNodes,
+			QueryID:  ev.QueryID,
+			Target:   ev.Target,
+			Seed:     ev.Seed,
+			Strategy: ev.Strategy,
 		}
 		if ev.Notify != nil {
 			p.notifiers[ev.QueryID] = &queryNotifier[*EventQueryFinished]{monitor: ev.Notify}
 		}
 	case *EventStartMessageQuery:
 		cmd = &query.EventPoolAddQuery[kadt.Key, kadt.PeerID, *pb.Message]{
-			QueryID: ev.QueryID,
-			Target:  ev.Target,
-			Message: ev.Message,
-			Seed:    ev.KnownClosestNodes,
+			QueryID:  ev.QueryID,
+			Target:   ev.Target,
+			Message:  ev.Message,
+			Seed:     ev.Seed,
+			Strategy: ev.Strategy,
 		}
 		if ev.Notify != nil {
 			p.notifiers[ev.QueryID] = &queryNotifier[*EventQueryFinished]{monitor: ev.Notify}
@@ -298,6 +311,7 @@ func (p *QueryBehaviour) perfomNextInbound(ctx context.Context) (BehaviourEvent,
 		cmd = &query.EventPoolNodeResponse[kadt.Key, kadt.PeerID]{
 			NodeID:      ev.To,
 			QueryID:     ev.QueryID,
+			Target:      ev.Target,
 			CloserNodes: ev.CloserNodes,
 		}
 	case *EventGetCloserNodesFailure:
@@ -388,6 +402,7 @@ func (p *QueryBehaviour) advancePool(ctx context.Context, ev query.PoolEvent) (o
 		return &EventOutboundSendMessage{
 			QueryID: st.QueryID,
 			To:      st.NodeID,
+			Target:  st.Target,
 			Message: st.Message,
 			Notify:  p,
 		}, true
@@ -430,7 +445,7 @@ func (p *QueryBehaviour) queueNonConnectivityEvent(nid kadt.PeerID) {
 	})
 }
 
-type queryNotifier[E TerminalQueryEvent] struct {
+type queryNotifier[E TerminalBehaviourEvent] struct {
 	monitor  QueryMonitor[E]
 	pending  []CtxEvent[*EventQueryProgressed]
 	stopping bool

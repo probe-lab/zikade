@@ -7,84 +7,145 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ipfs/boxo/provider"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
 	recpb "github.com/libp2p/go-libp2p-record/pb"
-	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/routing"
-	"github.com/plprobelab/zikade/internal/coord"
+	"github.com/multiformats/go-multiaddr"
+	mh "github.com/multiformats/go-multihash"
 	"go.opentelemetry.io/otel/attribute"
 	otel "go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
+	"github.com/plprobelab/zikade/internal/coord"
 	"github.com/plprobelab/zikade/internal/coord/coordt"
+	"github.com/plprobelab/zikade/internal/coord/query"
 	"github.com/plprobelab/zikade/kadt"
 	"github.com/plprobelab/zikade/pb"
 )
 
-var _ routing.Routing = (*DHT)(nil)
+type FullRT struct {
+	*DHT
 
-func (d *DHT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error) {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.FindPeer")
+	cfg         *FullRTConfig
+	queryConfig *coord.QueryConfig
+}
+
+type FullRTConfig struct {
+	*Config
+	CrawlInterval          time.Duration
+	QuorumFrac             float64
+	FindPeerConnectTimeout time.Duration
+}
+
+func DefaultFullRTConfig() *FullRTConfig {
+	return &FullRTConfig{
+		Config:                 DefaultConfig(),
+		CrawlInterval:          time.Hour, // MAGIC
+		QuorumFrac:             0.25,      // MAGIC
+		FindPeerConnectTimeout: 5 * time.Second,
+	}
+}
+
+func NewFullRT(h host.Host, cfg *FullRTConfig) (*FullRT, error) {
+	d, err := New(h, cfg.Config)
+	if err != nil {
+		return nil, fmt.Errorf("new DHT: %w", err)
+	}
+
+	if cfg.Query.DefaultQuorum == 0 {
+		cfg.Query.DefaultQuorum = int(float64(cfg.BucketSize) * cfg.QuorumFrac)
+	}
+
+	qcfg := coord.DefaultQueryConfig()
+	qcfg.NumResults = cfg.BucketSize
+	qcfg.Strategy = &query.StrategyStatic{}
+
+	frt := &FullRT{
+		DHT:         d,
+		cfg:         cfg,
+		queryConfig: qcfg,
+	}
+
+	return frt, nil
+}
+
+var _ provider.ProvideMany = (*FullRT)(nil)
+
+func (f *FullRT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error) {
+	ctx, span := f.tele.Tracer.Start(ctx, "FullRT.FindPeer")
 	defer span.End()
 
 	// First check locally. If we are or were recently connected to the peer,
 	// return the addresses from our peerstore unless the information doesn't
 	// contain any.
-	addrInfo, err := d.getRecentAddrInfo(pid)
+	addrInfo, err := f.getRecentAddrInfo(pid)
 	if err == nil {
 		return addrInfo, nil
 	}
 
-	var foundPeer peer.ID
+	maddrsMap := make(map[multiaddr.Multiaddr]struct{})
+	quorum := f.cfg.Query.DefaultQuorum
 	fn := func(ctx context.Context, visited kadt.PeerID, msg *pb.Message, stats coordt.QueryStats) error {
-		if peer.ID(visited) == pid {
-			foundPeer = peer.ID(visited)
+		for _, addrInfo := range msg.CloserPeersAddrInfos() {
+			if addrInfo.ID != pid {
+				continue
+			}
+
+			for _, maddr := range addrInfo.Addrs {
+				maddrsMap[maddr] = struct{}{}
+			}
+		}
+
+		quorum -= 1
+		if quorum == 0 {
 			return coordt.ErrSkipRemaining
 		}
+
 		return nil
 	}
 
-	qcfg := coord.DefaultQueryConfig()
-	qcfg.NumResults = d.cfg.BucketSize
-
-	_, _, err = d.kad.QueryClosest(ctx, kadt.PeerID(pid).Key(), fn, qcfg)
+	// start the query with a static set of peers (see queryConfig)
+	_, _, err = f.kad.QueryClosest(ctx, kadt.PeerID(pid).Key(), fn, f.queryConfig)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
 
-	if foundPeer == "" {
-		return peer.AddrInfo{}, fmt.Errorf("peer record not found")
+	// if we haven't found any addresses, return a not found error
+	if len(maddrsMap) == 0 {
+		return peer.AddrInfo{}, routing.ErrNotFound
 	}
 
-	return d.host.Peerstore().PeerInfo(foundPeer), nil
-}
-
-// getRecentAddrInfo returns the peer's address information if we are or were
-// recently connected to it.
-func (d *DHT) getRecentAddrInfo(pid peer.ID) (peer.AddrInfo, error) {
-	switch d.host.Network().Connectedness(pid) {
-	case network.Connected, network.CanConnect:
-		addrInfo := d.host.Peerstore().PeerInfo(pid)
-		if addrInfo.ID != "" && len(addrInfo.Addrs) > 0 {
-			return addrInfo, nil
-		}
-	default:
-		// we're not connected or were recently connected
+	// transform map into slice
+	maddrs := make([]multiaddr.Multiaddr, 0, len(maddrsMap))
+	for maddr := range maddrsMap {
+		maddrs = append(maddrs, maddr)
 	}
-	return peer.AddrInfo{}, routing.ErrNotFound
+
+	// connect to peer (this also happens in the non-fullrt case)
+	connCtx, cancel := context.WithTimeout(ctx, f.cfg.FindPeerConnectTimeout)
+	defer cancel()
+	_ = f.host.Connect(connCtx, peer.AddrInfo{
+		ID:    pid,
+		Addrs: maddrs,
+	})
+
+	// return addresses
+	return f.getRecentAddrInfo(pid)
 }
 
-func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Provide", otel.WithAttributes(attribute.String("cid", c.String())))
+func (f *FullRT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
+	ctx, span := f.tele.Tracer.Start(ctx, "FullRT.Provide", otel.WithAttributes(attribute.String("cid", c.String())))
 	defer span.End()
 
 	// verify if this DHT supports provider records by checking if a "providers"
 	// backend is registered.
-	b, found := d.backends[namespaceProviders]
+	b, found := f.backends[namespaceProviders]
 	if !found {
 		return routing.ErrNotSupported
 	}
@@ -95,7 +156,7 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 	}
 
 	// store ourselves as one provider for that CID
-	_, err := b.Store(ctx, string(c.Hash()), peer.AddrInfo{ID: d.host.ID()})
+	_, err := b.Store(ctx, string(c.Hash()), peer.AddrInfo{ID: f.host.ID()})
 	if err != nil {
 		return fmt.Errorf("storing own provider record: %w", err)
 	}
@@ -106,43 +167,43 @@ func (d *DHT) Provide(ctx context.Context, c cid.Cid, brdcst bool) error {
 	}
 
 	// construct message
-	self := peer.AddrInfo{
-		ID:    d.host.ID(),
-		Addrs: d.host.Addrs(),
+	addrInfo := peer.AddrInfo{
+		ID:    f.host.ID(),
+		Addrs: f.host.Addrs(),
 	}
 
 	msg := &pb.Message{
 		Type: pb.Message_ADD_PROVIDER,
 		Key:  c.Hash(),
 		ProviderPeers: []*pb.Message_Peer{
-			pb.FromAddrInfo(self),
+			pb.FromAddrInfo(addrInfo),
 		},
 	}
 
-	seed, err := d.kad.GetClosestNodes(ctx, msg.Target(), d.cfg.BucketSize)
+	seed, err := f.kad.GetClosestNodes(ctx, msg.Target(), f.cfg.BucketSize)
 	if err != nil {
-		return fmt.Errorf("getting closest nodes: %w", err)
+		return fmt.Errorf("get closest nodes from routing table: %w", err)
 	}
 
-	// finally, find the closest peers to the target key.
-	return d.kad.BroadcastRecord(ctx, msg, seed)
+	// finally, store the record with the currently known closest peers
+	return f.kad.BroadcastStatic(ctx, msg, seed)
 }
 
-func (d *DHT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
+func (f *FullRT) FindProvidersAsync(ctx context.Context, c cid.Cid, count int) <-chan peer.AddrInfo {
 	peerOut := make(chan peer.AddrInfo)
-	go d.findProvidersAsyncRoutine(ctx, c, count, peerOut)
+	go f.findProvidersAsyncRoutine(ctx, c, count, peerOut)
 	return peerOut
 }
 
-func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count int, out chan<- peer.AddrInfo) {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.findProvidersAsyncRoutine", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
+func (f *FullRT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count int, out chan<- peer.AddrInfo) {
+	_, span := f.tele.Tracer.Start(ctx, "DHT.findProvidersAsyncRoutine", otel.WithAttributes(attribute.String("cid", c.String()), attribute.Int("count", count)))
 	defer span.End()
 
 	defer close(out)
 
 	// verify if this DHT supports provider records by checking
 	// if a "providers" backend is registered.
-	b, found := d.backends[namespaceProviders]
+	b, found := f.backends[namespaceProviders]
 	if !found || !c.Defined() {
 		span.RecordError(fmt.Errorf("no providers backend registered or CID undefined"))
 		return
@@ -157,7 +218,7 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 	if err != nil {
 		if !errors.Is(err, ds.ErrNotFound) {
 			span.RecordError(err)
-			d.log.Warn("Fetching value from provider store", slog.String("cid", c.String()), slog.String("err", err.Error()))
+			f.log.Warn("Fetching value from provider store", slog.String("cid", c.String()), slog.String("err", err.Error()))
 			return
 		}
 
@@ -167,7 +228,7 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 	ps, ok := stored.(*providerSet)
 	if !ok {
 		span.RecordError(err)
-		d.log.Warn("Stored value is not a provider set", slog.String("cid", c.String()), slog.String("type", fmt.Sprintf("%T", stored)))
+		f.log.Warn("Stored value is not a provider set", slog.String("cid", c.String()), slog.String("type", fmt.Sprintf("%T", stored)))
 		return
 	}
 
@@ -222,13 +283,10 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 		return nil
 	}
 
-	qcfg := coord.DefaultQueryConfig()
-	qcfg.NumResults = d.cfg.BucketSize
-
-	_, _, err = d.kad.QueryMessage(ctx, msg, fn, qcfg)
+	_, _, err = f.kad.QueryMessage(ctx, msg, fn, f.queryConfig)
 	if err != nil {
 		span.RecordError(err)
-		d.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))
+		f.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))
 		return
 	}
 }
@@ -238,8 +296,8 @@ func (d *DHT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count in
 // format `/$namespace/$binary_id`. Namespace examples are `pk` or `ipns`. To
 // identify the closest peers to keyStr, that complete string will be SHA256
 // hashed.
-func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ...routing.Option) error {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValue")
+func (f *FullRT) PutValue(ctx context.Context, keyStr string, value []byte, opts ...routing.Option) error {
+	ctx, span := f.tele.Tracer.Start(ctx, "FullRT.PutValue")
 	defer span.End()
 
 	// first parse the routing options
@@ -249,7 +307,7 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 	}
 
 	// then always store the given value locally
-	if err := d.putValueLocal(ctx, keyStr, value); err != nil {
+	if err := f.putValueLocal(ctx, keyStr, value); err != nil {
 		return fmt.Errorf("put value locally: %w", err)
 	}
 
@@ -258,56 +316,45 @@ func (d *DHT) PutValue(ctx context.Context, keyStr string, value []byte, opts ..
 		return nil
 	}
 
-	// construct Kademlia-key. Yes, we hash the complete key string which
-	// includes the namespace prefix.
+	// construct message that we will send to other peer
 	msg := &pb.Message{
 		Type:   pb.Message_PUT_VALUE,
 		Key:    []byte(keyStr),
 		Record: record.MakePutRecord(keyStr, value),
 	}
 
-	seed, err := d.kad.GetClosestNodes(ctx, msg.Target(), d.cfg.BucketSize)
+	seed, err := f.kad.GetClosestNodes(ctx, msg.Target(), f.cfg.BucketSize)
 	if err != nil {
-		return fmt.Errorf("getting closest nodes: %w", err)
+		return fmt.Errorf("get closest nodes from routing table: %w", err)
 	}
 
-	// finally, find the closest peers to the target key.
-	return d.kad.BroadcastRecord(ctx, msg, seed)
+	// finally, store the record with the currently known closest peers
+	return f.kad.BroadcastStatic(ctx, msg, seed)
 }
 
-// putValueLocal stores a value in the local datastore without reaching out to
-// the network.
-func (d *DHT) putValueLocal(ctx context.Context, key string, value []byte) error {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.PutValueLocal")
+func (f *FullRT) Bootstrap(ctx context.Context) error {
+	ctx, span := f.tele.Tracer.Start(ctx, "FullRT.Bootstrap")
 	defer span.End()
 
-	ns, path, err := record.SplitKey(key)
-	if err != nil {
-		return fmt.Errorf("splitting key: %w", err)
+	f.log.Info("Starting crawl bootstrap")
+	seed := make([]kadt.PeerID, len(f.cfg.BootstrapPeers))
+	for i, addrInfo := range f.cfg.BootstrapPeers {
+		seed[i] = kadt.PeerID(addrInfo.ID)
+		// TODO: how to handle TTL if BootstrapPeers become dynamic and don't
+		// point to stable peers or consist of ephemeral peers that we have
+		// observed during a previous run.
+		f.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
 	}
 
-	b, found := d.backends[ns]
-	if !found {
-		return routing.ErrNotSupported
-	}
-
-	rec := record.MakePutRecord(key, value)
-	rec.TimeReceived = d.cfg.Clock.Now().UTC().Format(time.RFC3339Nano)
-
-	_, err = b.Store(ctx, path, rec)
-	if err != nil {
-		return fmt.Errorf("store record locally: %w", err)
-	}
-
-	return nil
+	return f.kad.Crawl(ctx, seed)
 }
 
-func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.GetValue")
+func (f *FullRT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
+	ctx, span := f.tele.Tracer.Start(ctx, "FullRT.GetValue")
 	defer span.End()
 
 	// start searching for value
-	valueChan, err := d.SearchValue(ctx, key, opts...)
+	valueChan, err := f.SearchValue(ctx, key, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -336,8 +383,8 @@ func (d *DHT) GetValue(ctx context.Context, key string, opts ...routing.Option) 
 
 // SearchValue will search in the DHT for keyStr. keyStr must have the form
 // `/$namespace/$binary_id`
-func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing.Option) (<-chan []byte, error) {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.SearchValue")
+func (f *FullRT) SearchValue(ctx context.Context, keyStr string, options ...routing.Option) (<-chan []byte, error) {
+	_, span := f.tele.Tracer.Start(ctx, "FullRT.SearchValue")
 	defer span.End()
 
 	// first parse the routing options
@@ -351,7 +398,7 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 		return nil, fmt.Errorf("splitting key: %w", err)
 	}
 
-	b, found := d.backends[ns]
+	b, found := f.backends[ns]
 	if !found {
 		return nil, routing.ErrNotSupported
 	}
@@ -367,7 +414,7 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 		}
 
 		out := make(chan []byte)
-		go d.searchValueRoutine(ctx, b, ns, path, rOpt, out)
+		go f.searchValueRoutine(ctx, b, ns, path, rOpt, out)
 		return out, nil
 	}
 
@@ -386,14 +433,14 @@ func (d *DHT) SearchValue(ctx context.Context, keyStr string, options ...routing
 	out := make(chan []byte)
 	go func() {
 		out <- rec.GetValue()
-		d.searchValueRoutine(ctx, b, ns, path, rOpt, out)
+		f.searchValueRoutine(ctx, b, ns, path, rOpt, out)
 	}()
 
 	return out, nil
 }
 
-func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string, path string, ropt *routing.Options, out chan<- []byte) {
-	_, span := d.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
+func (f *FullRT) searchValueRoutine(ctx context.Context, backend Backend, ns string, path string, ropt *routing.Options, out chan<- []byte) {
+	_, span := f.tele.Tracer.Start(ctx, "DHT.searchValueRoutine")
 	defer span.End()
 	defer close(out)
 
@@ -416,7 +463,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 	// The quorum that we require for terminating the query. This number tells
 	// us how many peers must have responded with the "best" value before we
 	// cancel the query.
-	quorum := d.getQuorum(ropt)
+	quorum := f.getQuorum(ropt)
 
 	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats coordt.QueryStats) error {
 		rec := resp.GetRecord()
@@ -454,7 +501,7 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 			return nil
 
 		default:
-			d.log.Warn("unexpected validate index", slog.Int("idx", idx))
+			f.log.Warn("unexpected validate index", slog.Int("idx", idx))
 		}
 
 		// Check if we have reached the quorum
@@ -465,12 +512,9 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 		return nil
 	}
 
-	qcfg := coord.DefaultQueryConfig()
-	qcfg.NumResults = d.cfg.BucketSize
-
-	_, _, err := d.kad.QueryMessage(ctx, req, fn, qcfg)
+	_, _, err := f.kad.QueryMessage(ctx, req, fn, f.queryConfig)
 	if err != nil {
-		d.warnErr(err, "Search value query failed")
+		f.warnErr(err, "Search value query failed")
 		return
 	}
 
@@ -487,60 +531,99 @@ func (d *DHT) searchValueRoutine(ctx context.Context, backend Backend, ns string
 			Record: record.MakePutRecord(string(routingKey), best),
 		}
 
-		if err := d.kad.BroadcastStatic(ctx, msg, fixupPeers); err != nil {
-			d.log.Warn("Failed updating peer")
+		if err := f.kad.BroadcastStatic(ctx, msg, fixupPeers); err != nil {
+			f.log.Warn("Failed updating peer")
 		}
 	}()
 }
 
-// quorumOptionKey is a struct that is used as a routing options key to pass
-// the desired quorum value into, e.g., SearchValue or GetValue.
-type quorumOptionKey struct{}
-
-// RoutingQuorum accepts the desired quorum that is required to terminate the
-// search query. The quorum value must not be negative but can be 0 in which
-// case we continue the query until we have exhausted the keyspace. If no
-// quorum is specified, the [Config.DefaultQuorum] value will be used.
-func RoutingQuorum(n int) routing.Option {
-	return func(opts *routing.Options) error {
-		if n < 0 {
-			return fmt.Errorf("quorum must not be negative")
-		}
-
-		if opts.Other == nil {
-			opts.Other = make(map[interface{}]interface{}, 1)
-		}
-
-		opts.Other[quorumOptionKey{}] = n
-
-		return nil
-	}
-}
-
-// getQuorum extracts the quorum value from the given routing options and
-// returns [Config.DefaultQuorum] if no quorum value is present.
-func (d *DHT) getQuorum(opts *routing.Options) int {
-	quorum, ok := opts.Other[quorumOptionKey{}].(int)
-	if !ok {
-		quorum = d.cfg.Query.DefaultQuorum
-	}
-
-	return quorum
-}
-
-func (d *DHT) Bootstrap(ctx context.Context) error {
-	ctx, span := d.tele.Tracer.Start(ctx, "DHT.Bootstrap")
+func (f *FullRT) ProvideMany(ctx context.Context, mhashes []mh.Multihash) error {
+	_, span := f.tele.Tracer.Start(ctx, "FullRT.ProvideMany")
 	defer span.End()
-	d.log.Info("Starting bootstrap")
 
-	seed := make([]kadt.PeerID, len(d.cfg.BootstrapPeers))
-	for i, addrInfo := range d.cfg.BootstrapPeers {
-		seed[i] = kadt.PeerID(addrInfo.ID)
-		// TODO: how to handle TTL if BootstrapPeers become dynamic and don't
-		// point to stable peers or consist of ephemeral peers that we have
-		// observed during a previous run.
-		d.host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
+	_, found := f.backends[namespaceProviders]
+	if !found {
+		return routing.ErrNotSupported
 	}
 
-	return d.kad.Bootstrap(ctx, seed)
+	// Compute addresses once for all provides
+	self := peer.AddrInfo{
+		ID:    f.host.ID(),
+		Addrs: f.host.Addrs(),
+	}
+	if len(self.Addrs) < 1 {
+		return fmt.Errorf("no known addresses for self, cannot put provider")
+	}
+
+	msgFn := func(k kadt.Key) *pb.Message {
+		return &pb.Message{
+			Type: pb.Message_ADD_PROVIDER,
+			Key:  k.MsgKey(),
+			ProviderPeers: []*pb.Message_Peer{
+				pb.FromAddrInfo(self),
+			},
+		}
+	}
+
+	keys := make([]kadt.Key, 0, len(mhashes))
+	for _, mhash := range mhashes {
+		keys = append(keys, kadt.NewKey(mhash))
+	}
+
+	// track successes
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message) {
+		// TODO
+	}
+
+	return f.kad.BroadcastMany(ctx, keys, fn, msgFn)
+}
+
+func (f *FullRT) PutMany(ctx context.Context, keySlice []string, valueSlice [][]byte) error {
+	_, span := f.tele.Tracer.Start(ctx, "FullRT.PutMany")
+	defer span.End()
+
+	if len(keySlice) == 0 {
+		return fmt.Errorf("no keys")
+	}
+
+	ns, _, err := record.SplitKey(keySlice[0])
+	if err != nil {
+		return fmt.Errorf("splitting key: %w", err)
+	}
+
+	_, found := f.backends[ns]
+	if !found {
+		return routing.ErrNotSupported
+	}
+
+	if len(keySlice) != len(valueSlice) {
+		return fmt.Errorf("number of keys does not match the number of values")
+	}
+
+	kadKeys := make([]kadt.Key, 0, len(keySlice))
+	valueMap := make(map[string][]byte, len(valueSlice))
+	for i, preimage := range keySlice {
+		valueMap[preimage] = valueSlice[i]
+		kadKeys = append(kadKeys, kadt.NewKey([]byte(preimage)))
+	}
+
+	// Compute addresses once for all provides
+	self := peer.AddrInfo{
+		ID:    f.host.ID(),
+		Addrs: f.host.Addrs(),
+	}
+	if len(self.Addrs) < 1 {
+		return fmt.Errorf("no known addresses for self, cannot put provider")
+	}
+
+	msgFn := func(k kadt.Key) *pb.Message {
+		strKey := string(k.MsgKey())
+		return &pb.Message{
+			Type:   pb.Message_PUT_VALUE,
+			Key:    k.MsgKey(),
+			Record: record.MakePutRecord(strKey, valueMap[strKey]),
+		}
+	}
+
+	return f.kad.BroadcastMany(ctx, kadKeys, nil, msgFn)
 }

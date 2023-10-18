@@ -12,6 +12,25 @@ import (
 	"github.com/plprobelab/zikade/tele"
 )
 
+// ConfigFollowUp specifies the configuration for the [FollowUp] state machine.
+type ConfigFollowUp[K kad.Key[K]] struct {
+	Target K
+}
+
+// Validate checks the configuration options and returns an error if any have
+// invalid values.
+func (c *ConfigFollowUp[K]) Validate() error {
+	return nil
+}
+
+// DefaultConfigFollowUp returns the default configuration options for the
+// [FollowUp] state machine.
+func DefaultConfigFollowUp[K kad.Key[K]](target K) *ConfigFollowUp[K] {
+	return &ConfigFollowUp[K]{
+		Target: target,
+	}
+}
+
 // FollowUp is a [Broadcast] state machine and encapsulates the logic around
 // doing a "classic" put operation. This mimics the algorithm employed in the
 // original go-libp2p-kad-dht v1 code base. It first queries the closest nodes
@@ -22,7 +41,7 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	queryID coordt.QueryID
 
 	// a struct holding configuration options
-	cfg *ConfigFollowUp
+	cfg *ConfigFollowUp[K]
 
 	// a reference to the query pool in which the "get closer nodes" queries
 	// will be spawned. This pool is governed by the broadcast [Pool].
@@ -30,8 +49,18 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	// the logic much easier to implement.
 	pool *query.Pool[K, N, M]
 
-	// the message that we will send to the closest nodes in the follow-up phase
-	msg M
+	// started indicates that this state machine has sent out the first
+	// message to a node. Even after this state machine has returned a finished
+	// state, this flag will stay true.
+	started bool
+
+	// the message generator that takes a target key and will return the message
+	// that we will send to the closest nodes in the follow-up phase
+	msgFunc func(K) M
+
+	// seed holds the nodes from where we should start our query to find closer
+	// nodes to the target key (held by [ConfigFollowUp]).
+	seed []N
 
 	// the closest nodes to the target key. This will be filled after the query
 	// for the closest nodes has finished (when the query pool emits a
@@ -56,12 +85,14 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 }
 
 // NewFollowUp initializes a new [FollowUp] struct.
-func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, pool *query.Pool[K, N, M], msg M, cfg *ConfigFollowUp) *FollowUp[K, N, M] {
-	return &FollowUp[K, N, M]{
+func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.QueryID, msgFunc func(K) M, pool *query.Pool[K, N, M], seed []N, cfg *ConfigFollowUp[K]) *FollowUp[K, N, M] {
+	f := &FollowUp[K, N, M]{
 		queryID: qid,
 		cfg:     cfg,
 		pool:    pool,
-		msg:     msg,
+		started: false,
+		msgFunc: msgFunc,
+		seed:    seed,
 		todo:    map[string]N{},
 		waiting: map[string]N{},
 		success: map[string]N{},
@@ -70,6 +101,8 @@ func NewFollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message](qid coordt.Que
 			Err  error
 		}{},
 	}
+
+	return f
 }
 
 // Advance advances the state of the [FollowUp] [Broadcast] state machine. It
@@ -118,7 +151,8 @@ func (f *FollowUp[K, N, M]) Advance(ctx context.Context, ev BroadcastEvent) (out
 		return &StateBroadcastStoreRecord[K, N, M]{
 			QueryID: f.queryID,
 			NodeID:  n,
-			Message: f.msg,
+			Target:  f.cfg.Target,
+			Message: f.msgFunc(f.cfg.Target),
 		}
 	}
 
@@ -149,12 +183,6 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 	}()
 
 	switch ev := ev.(type) {
-	case *EventBroadcastStart[K, N]:
-		return &query.EventPoolAddFindCloserQuery[K, N]{
-			QueryID: f.queryID,
-			Target:  ev.Target,
-			Seed:    ev.Seed,
-		}
 	case *EventBroadcastStop:
 		if f.isQueryDone() {
 			return nil
@@ -185,7 +213,14 @@ func (f *FollowUp[K, N, M]) handleEvent(ctx context.Context, ev BroadcastEvent) 
 			Err  error
 		}{Node: ev.NodeID, Err: ev.Error}
 	case *EventBroadcastPoll:
-		// ignore, nothing to do
+		if !f.started {
+			f.started = true
+			return &query.EventPoolAddFindCloserQuery[K, N]{
+				QueryID: f.queryID,
+				Target:  f.cfg.Target,
+				Seed:    f.seed,
+			}
+		}
 		return &query.EventPoolPoll{}
 	default:
 		panic(fmt.Sprintf("unexpected event: %T", ev))

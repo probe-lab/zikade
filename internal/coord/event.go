@@ -1,6 +1,7 @@
 package coord
 
 import (
+	"github.com/plprobelab/zikade/internal/coord/brdcst"
 	"github.com/plprobelab/zikade/internal/coord/coordt"
 	"github.com/plprobelab/zikade/internal/coord/query"
 	"github.com/plprobelab/zikade/kadt"
@@ -29,12 +30,6 @@ type QueryCommand interface {
 	queryCommand()
 }
 
-// BrdcstCommand is a type of [BehaviourEvent] that instructs a [BrdcstBehaviour] to perform an action.
-type BrdcstCommand interface {
-	BehaviourEvent
-	brdcstCommand()
-}
-
 type NodeHandlerRequest interface {
 	BehaviourEvent
 	nodeHandlerRequest()
@@ -50,10 +45,10 @@ type RoutingNotification interface {
 	routingNotification()
 }
 
-// TerminalQueryEvent is a type of [BehaviourEvent] that indicates a query has completed.
-type TerminalQueryEvent interface {
+// TerminalBehaviourEvent is a type of [BehaviourEvent] that indicates a query has completed.
+type TerminalBehaviourEvent interface {
 	BehaviourEvent
-	terminalQueryEvent()
+	terminalBehaviourEvent()
 }
 
 type EventStartBootstrap struct {
@@ -77,6 +72,7 @@ func (*EventOutboundGetCloserNodes) networkCommand()     {}
 type EventOutboundSendMessage struct {
 	QueryID coordt.QueryID
 	To      kadt.PeerID
+	Target  kadt.Key
 	Message *pb.Message
 	Notify  Notify[BehaviourEvent]
 }
@@ -86,23 +82,25 @@ func (*EventOutboundSendMessage) nodeHandlerRequest() {}
 func (*EventOutboundSendMessage) networkCommand()     {}
 
 type EventStartMessageQuery struct {
-	QueryID           coordt.QueryID
-	Target            kadt.Key
-	Message           *pb.Message
-	KnownClosestNodes []kadt.PeerID
-	Notify            QueryMonitor[*EventQueryFinished]
-	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
+	QueryID    coordt.QueryID
+	Target     kadt.Key
+	Message    *pb.Message
+	Seed       []kadt.PeerID
+	Notify     QueryMonitor[*EventQueryFinished]
+	NumResults int            // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy   query.Strategy // the way the query should be performed - [query.StrategyConverge] will be used by default.
 }
 
 func (*EventStartMessageQuery) behaviourEvent() {}
 func (*EventStartMessageQuery) queryCommand()   {}
 
 type EventStartFindCloserQuery struct {
-	QueryID           coordt.QueryID
-	Target            kadt.Key
-	KnownClosestNodes []kadt.PeerID
-	Notify            QueryMonitor[*EventQueryFinished]
-	NumResults        int // the minimum number of nodes to successfully contact before considering iteration complete
+	QueryID    coordt.QueryID
+	Target     kadt.Key
+	Seed       []kadt.PeerID
+	Notify     QueryMonitor[*EventQueryFinished]
+	NumResults int            // the minimum number of nodes to successfully contact before considering iteration complete
+	Strategy   query.Strategy // the way the query should be performed - [query.StrategyConverge] will be used by default.
 }
 
 func (*EventStartFindCloserQuery) behaviourEvent() {}
@@ -117,7 +115,8 @@ func (*EventStopQuery) queryCommand()   {}
 
 // EventAddNode notifies the routing behaviour of a potential new peer.
 type EventAddNode struct {
-	NodeID kadt.PeerID
+	NodeID  kadt.PeerID
+	Checked bool // indicates whether this node has already passed a connectivity check and should be added to the routing table right away
 }
 
 func (*EventAddNode) behaviourEvent() {}
@@ -154,6 +153,7 @@ type EventSendMessageSuccess struct {
 	Request     *pb.Message
 	To          kadt.PeerID // To is the peer that the SendMessage request was sent to.
 	Response    *pb.Message
+	Target      kadt.Key
 	CloserNodes []kadt.PeerID
 }
 
@@ -192,8 +192,8 @@ type EventQueryFinished struct {
 	ClosestNodes []kadt.PeerID
 }
 
-func (*EventQueryFinished) behaviourEvent()     {}
-func (*EventQueryFinished) terminalQueryEvent() {}
+func (*EventQueryFinished) behaviourEvent()         {}
+func (*EventQueryFinished) terminalBehaviourEvent() {}
 
 // EventRoutingUpdated is emitted by the coordinator when a new node has been verified and added to the routing table.
 type EventRoutingUpdated struct {
@@ -245,3 +245,59 @@ type EventRoutingPoll struct{}
 
 func (*EventRoutingPoll) behaviourEvent() {}
 func (*EventRoutingPoll) routingCommand() {}
+
+type EventStartCrawl struct {
+	Seed []kadt.PeerID
+}
+
+func (*EventStartCrawl) behaviourEvent() {}
+
+// BrdcstCommand is a type of [BehaviourEvent] that instructs a [BrdcstBehaviour] to perform an action.
+type BrdcstCommand interface {
+	BehaviourEvent
+	brdcstCommand()
+}
+
+// EventStartBroadcast starts a new broadcast operation
+type EventStartBroadcast struct {
+	QueryID coordt.QueryID
+	MsgFunc func(k kadt.Key) *pb.Message
+	Seed    []kadt.PeerID
+	Config  brdcst.Config
+	Notify  QueryMonitor[*EventBroadcastFinished]
+}
+
+func (*EventStartBroadcast) behaviourEvent() {}
+
+type EventStopBroadcast struct {
+	QueryID coordt.QueryID
+}
+
+func (*EventStopBroadcast) behaviourEvent() {}
+func (*EventStopBroadcast) queryCommand()   {}
+
+// EventBroadcastProgressed is emitted by the coordinator when a broadcast
+// operation has progressed.
+type EventBroadcastProgressed struct {
+	QueryID  coordt.QueryID
+	NodeID   kadt.PeerID
+	Response *pb.Message
+	Stats    query.QueryStats
+}
+
+func (*EventBroadcastProgressed) behaviourEvent() {}
+
+// EventBroadcastFinished is emitted by the coordinator when a broadcasting
+// a record to the network has finished, either through running to completion or
+// by being canceled.
+type EventBroadcastFinished struct {
+	QueryID   coordt.QueryID
+	Contacted []kadt.PeerID
+	Errors    map[string]struct {
+		Node kadt.PeerID
+		Err  error
+	}
+}
+
+func (*EventBroadcastFinished) behaviourEvent()         {}
+func (*EventBroadcastFinished) terminalBehaviourEvent() {}

@@ -23,7 +23,6 @@ func TestBroadcastEvent_interface_conformance(t *testing.T) {
 	events := []BroadcastEvent{
 		&EventBroadcastStop{},
 		&EventBroadcastPoll{},
-		&EventBroadcastStart[tiny.Key, tiny.Node]{},
 		&EventBroadcastNodeResponse[tiny.Key, tiny.Node]{},
 		&EventBroadcastNodeFailure[tiny.Key, tiny.Node]{},
 		&EventBroadcastStoreRecordSuccess[tiny.Key, tiny.Node, tiny.Message]{},

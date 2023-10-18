@@ -17,6 +17,29 @@ import (
 // are the [FollowUp] and [Static] state machines.
 type Broadcast = coordt.StateMachine[BroadcastEvent, BroadcastState]
 
+// ConfigPool specifies the configuration for a broadcast [Pool].
+type ConfigPool struct {
+	pCfg *query.PoolConfig
+}
+
+// Validate checks the configuration options and returns an error if any have
+// invalid values.
+func (cfg *ConfigPool) Validate() error {
+	if cfg.pCfg == nil {
+		return fmt.Errorf("query pool config must not be nil")
+	}
+
+	return nil
+}
+
+// DefaultConfigPool returns the default configuration options for a Pool.
+// Options may be overridden before passing to NewPool
+func DefaultConfigPool() *ConfigPool {
+	return &ConfigPool{
+		pCfg: query.DefaultPoolConfig(),
+	}
+}
+
 // Pool is a [coordt.StateMachine] that manages all running broadcast
 // operations. In the future it could limit the number of concurrent operations,
 // but right now it is just keeping track of all running broadcasts. The
@@ -119,19 +142,16 @@ func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (sm Broad
 	case *EventPoolStartBroadcast[K, N, M]:
 		// first initialize the state machine for the broadcast desired strategy
 		switch cfg := ev.Config.(type) {
-		case *ConfigFollowUp:
-			p.bcs[ev.QueryID] = NewFollowUp[K, N, M](ev.QueryID, p.qp, ev.Message, cfg)
-		case *ConfigStatic:
-			p.bcs[ev.QueryID] = NewStatic[K, N, M](ev.QueryID, ev.Message, cfg)
-		case *ConfigOptimistic:
-			panic("implement me")
+		case *ConfigFollowUp[K]:
+			p.bcs[ev.QueryID] = NewFollowUp[K, N, M](ev.QueryID, ev.MsgFunc, p.qp, ev.Seed, cfg)
+		case *ConfigOneToMany[K]:
+			p.bcs[ev.QueryID] = NewOneToMany[K, N, M](ev.QueryID, ev.MsgFunc, ev.Seed, cfg)
+		case *ConfigManyToMany[K]:
+			p.bcs[ev.QueryID] = NewManyToMany[K, N, M](ev.QueryID, ev.MsgFunc, ev.Seed, cfg)
 		}
 
 		// start the new state machine
-		return p.bcs[ev.QueryID], &EventBroadcastStart[K, N]{
-			Target: ev.Target,
-			Seed:   ev.Seed,
-		}
+		return p.bcs[ev.QueryID], &EventBroadcastPoll{}
 
 	case *EventPoolStopBroadcast:
 		return p.bcs[ev.QueryID], &EventBroadcastStop{}
@@ -151,6 +171,7 @@ func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (sm Broad
 	case *EventPoolStoreRecordSuccess[K, N, M]:
 		return p.bcs[ev.QueryID], &EventBroadcastStoreRecordSuccess[K, N, M]{
 			NodeID:   ev.NodeID,
+			Target:   ev.Target,
 			Request:  ev.Request,
 			Response: ev.Response,
 		}
@@ -158,6 +179,7 @@ func (p *Pool[K, N, M]) handleEvent(ctx context.Context, ev PoolEvent) (sm Broad
 	case *EventPoolStoreRecordFailure[K, N, M]:
 		return p.bcs[ev.QueryID], &EventBroadcastStoreRecordFailure[K, N, M]{
 			NodeID:  ev.NodeID,
+			Target:  ev.Target,
 			Request: ev.Request,
 			Error:   ev.Error,
 		}
@@ -193,6 +215,7 @@ func (p *Pool[K, N, M]) advanceBroadcast(ctx context.Context, sm Broadcast, bev 
 		return &StatePoolStoreRecord[K, N, M]{
 			QueryID: st.QueryID,
 			NodeID:  st.NodeID,
+			Target:  st.Target,
 			Message: st.Message,
 		}, true
 	case *StateBroadcastFinished[K, N]:
@@ -235,6 +258,7 @@ type StatePoolWaiting struct{}
 type StatePoolStoreRecord[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID // the id of the broadcast operation that wants to send the message
 	NodeID  N              // the node to send the message to
+	Target  K              // the key we want to store a record for
 	Message M              // the message that should be sent to the remote node
 }
 
@@ -283,8 +307,7 @@ type EventPoolPoll struct{}
 // operation. This is the entry point.
 type EventPoolStartBroadcast[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID // the unique ID for this operation
-	Target  K              // the key we want to store the record for
-	Message M              // the message that we want to send to the closest peers (this encapsulates the payload we want to store)
+	MsgFunc func(K) M      // a message generator that takes a target key and returns the message we will send out
 	Seed    []N            // the closest nodes we know so far and from where we start the operation
 	Config  Config         // the configuration for this operation. Most importantly, this defines the broadcast strategy ([FollowUp] or [Static])
 }
@@ -324,6 +347,7 @@ type EventPoolGetCloserNodesFailure[K kad.Key[K], N kad.NodeID[K]] struct {
 type EventPoolStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID  coordt.QueryID // the id of the query that sent the message
 	NodeID   N              // the node the message was sent to
+	Target   K              // the key we successfully stored a record for
 	Request  M              // the message that was sent to the remote node
 	Response M              // the reply we got from the remote node (nil in many cases of the Amino DHT)
 }
@@ -334,6 +358,7 @@ type EventPoolStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Message
 type EventPoolStoreRecordFailure[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID // the id of the query that sent the message
 	NodeID  N              // the node the message was sent to
+	Target  K              // the key we failed to store a record for
 	Request M              // the message that was sent to the remote node
 	Error   error          // the error that caused the failure
 }

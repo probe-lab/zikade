@@ -116,11 +116,11 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesNoProgress() {
 
 	waiter := NewQueryWaiter(5)
 	cmd := &EventStartFindCloserQuery{
-		QueryID:           "test",
-		Target:            target,
-		KnownClosestNodes: seeds,
-		Notify:            waiter,
-		NumResults:        10,
+		QueryID:    "test",
+		Target:     target,
+		Seed:       seeds,
+		Notify:     waiter,
+		NumResults: 10,
 	}
 
 	// queue the start of the query
@@ -163,11 +163,11 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryProgressed() {
 
 	waiter := NewQueryWaiter(5)
 	cmd := &EventStartFindCloserQuery{
-		QueryID:           "test",
-		Target:            target,
-		KnownClosestNodes: seeds,
-		Notify:            waiter,
-		NumResults:        10,
+		QueryID:    "test",
+		Target:     target,
+		Seed:       seeds,
+		Notify:     waiter,
+		NumResults: 10,
 	}
 
 	// queue the start of the query
@@ -211,11 +211,11 @@ func (ts *QueryBehaviourBaseTestSuite) TestNotifiesQueryFinished() {
 
 	waiter := NewQueryWaiter(5)
 	cmd := &EventStartFindCloserQuery{
-		QueryID:           "test",
-		Target:            target,
-		KnownClosestNodes: seeds,
-		Notify:            waiter,
-		NumResults:        10,
+		QueryID:    "test",
+		Target:     target,
+		Seed:       seeds,
+		Notify:     waiter,
+		NumResults: 10,
 	}
 
 	// queue the start of the query
@@ -297,6 +297,7 @@ func TestQuery_deadlock_regression(t *testing.T) {
 			QueryID:     queryID,
 			Request:     msg,
 			To:          to,
+			Target:      msg.Target(),
 			Response:    nil,
 			CloserNodes: closer,
 		}
@@ -319,12 +320,12 @@ func TestQuery_deadlock_regression(t *testing.T) {
 
 	// start the message query
 	c.queryBehaviour.Notify(ctx, &EventStartMessageQuery{
-		QueryID:           queryID,
-		Target:            msg.Target(),
-		Message:           msg,
-		KnownClosestNodes: []kadt.PeerID{nodes[1].NodeID},
-		Notify:            wrappedWaiter,
-		NumResults:        0,
+		QueryID:    queryID,
+		Target:     msg.Target(),
+		Message:    msg,
+		Seed:       []kadt.PeerID{nodes[1].NodeID},
+		Notify:     wrappedWaiter,
+		NumResults: 0,
 	})
 
 	// advance state machines and assert that the state machine

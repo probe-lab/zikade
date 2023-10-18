@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -301,28 +302,35 @@ func (c *Coordinator) GetClosestNodes(ctx context.Context, k kadt.Key, n int) ([
 // numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
 // The query is considered to be exhausted when it has received responses from at least this number of nodes
 // and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
-func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
+func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coordt.QueryFunc, cfg *QueryConfig) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Query")
 	defer span.End()
 	c.cfg.Logger.Debug("starting query for closest nodes", tele.LogAttrKey(target))
 
+	if cfg == nil {
+		cfg = DefaultQueryConfig()
+	} else if err := cfg.Validate(); err != nil {
+		return nil, coordt.QueryStats{}, fmt.Errorf("validate query config: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	seedIDs, err := c.GetClosestNodes(ctx, target, 20)
+	seedIDs, err := c.GetClosestNodes(ctx, target, cfg.NumResults)
 	if err != nil {
 		return nil, coordt.QueryStats{}, err
 	}
 
-	waiter := NewQueryWaiter(numResults)
+	waiter := NewQueryWaiter(cfg.NumResults)
 	queryID := c.newOperationID()
 
 	cmd := &EventStartFindCloserQuery{
-		QueryID:           queryID,
-		Target:            target,
-		KnownClosestNodes: seedIDs,
-		Notify:            waiter,
-		NumResults:        numResults,
+		QueryID:    queryID,
+		Target:     target,
+		Seed:       seedIDs,
+		Notify:     waiter,
+		NumResults: cfg.NumResults,
+		Strategy:   cfg.Strategy,
 	}
 
 	// queue the start of the query
@@ -342,7 +350,7 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 // numResults specifies the minimum number of nodes to successfully contact before considering iteration complete.
 // The query is considered to be exhausted when it has received responses from at least this number of nodes
 // and there are no closer nodes remaining to be contacted. A default of 20 is used if this value is less than 1.
-func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, numResults int) ([]kadt.PeerID, coordt.QueryStats, error) {
+func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coordt.QueryFunc, cfg *QueryConfig) ([]kadt.PeerID, coordt.QueryStats, error) {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.QueryMessage")
 	defer span.End()
 	if msg == nil {
@@ -353,25 +361,27 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if numResults < 1 {
-		numResults = 20 // TODO: parameterize
+	if cfg == nil {
+		cfg = DefaultQueryConfig()
 	}
+	// TODO: validate config
 
-	seedIDs, err := c.GetClosestNodes(ctx, msg.Target(), numResults)
+	seedIDs, err := c.GetClosestNodes(ctx, msg.Target(), cfg.NumResults)
 	if err != nil {
 		return nil, coordt.QueryStats{}, err
 	}
 
-	waiter := NewQueryWaiter(numResults)
+	waiter := NewQueryWaiter(cfg.NumResults)
 	queryID := c.newOperationID()
 
 	cmd := &EventStartMessageQuery{
-		QueryID:           queryID,
-		Target:            msg.Target(),
-		Message:           msg,
-		KnownClosestNodes: seedIDs,
-		Notify:            waiter,
-		NumResults:        numResults,
+		QueryID:    queryID,
+		Target:     msg.Target(),
+		Message:    msg,
+		Seed:       seedIDs,
+		Notify:     waiter,
+		NumResults: cfg.NumResults,
+		Strategy:   cfg.Strategy,
 	}
 
 	// queue the start of the query
@@ -381,31 +391,30 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 	return closest, stats, err
 }
 
-func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message) error {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastRecord")
-	defer span.End()
-	if msg == nil {
-		return fmt.Errorf("no message supplied for broadcast")
-	}
-	c.cfg.Logger.Debug("starting broadcast with message", tele.LogAttrKey(msg.Target()), slog.String("type", msg.Type.String()))
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	seeds, err := c.GetClosestNodes(ctx, msg.Target(), 20) // TODO: parameterize
-	if err != nil {
-		return err
-	}
-	return c.broadcast(ctx, msg, seeds, brdcst.DefaultConfigFollowUp())
+func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, seed []kadt.PeerID) error {
+	msgFunc := func(k kadt.Key) *pb.Message { return msg }
+	return c.broadcast(ctx, msgFunc, seed, coordt.BrdcstFuncNoop, brdcst.DefaultConfigFollowUp(msg.Target()))
 }
 
-func (c *Coordinator) BroadcastStatic(ctx context.Context, msg *pb.Message, seeds []kadt.PeerID) error {
-	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.BroadcastStatic")
-	defer span.End()
-	return c.broadcast(ctx, msg, seeds, brdcst.DefaultConfigStatic())
+func (c *Coordinator) BroadcastStatic(ctx context.Context, msg *pb.Message, seed []kadt.PeerID) error {
+	msgFunc := func(k kadt.Key) *pb.Message { return msg }
+	return c.broadcast(ctx, msgFunc, seed, coordt.BrdcstFuncNoop, brdcst.DefaultConfigOneToMany(msg.Target()))
 }
 
-func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []kadt.PeerID, cfg brdcst.Config) error {
+func (c *Coordinator) BroadcastMany(ctx context.Context, keys []kadt.Key, fn coordt.BrdcstFunc, msgFn func(k kadt.Key) *pb.Message) error {
+	// verify that we have keys to push into the network
+	if len(keys) == 0 {
+		return fmt.Errorf("no keys to broadcast")
+	}
+
+	// grab the entire routing table contents
+	seed := c.rt.NearestNodes(keys[0], math.MaxInt)
+
+	// start broadcasting
+	return c.broadcast(ctx, msgFn, seed, fn, brdcst.DefaultConfigManyToMany(keys))
+}
+
+func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *pb.Message, seed []kadt.PeerID, fn coordt.BrdcstFunc, cfg brdcst.Config) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.broadcast")
 	defer span.End()
 
@@ -417,9 +426,8 @@ func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []ka
 
 	cmd := &EventStartBroadcast{
 		QueryID: queryID,
-		Target:  msg.Target(),
-		Message: msg,
-		Seed:    seeds,
+		MsgFunc: msgFunc,
+		Seed:    seed,
 		Notify:  waiter,
 		Config:  cfg,
 	}
@@ -427,7 +435,7 @@ func (c *Coordinator) broadcast(ctx context.Context, msg *pb.Message, seeds []ka
 	// queue the start of the query
 	c.brdcstBehaviour.Notify(ctx, cmd)
 
-	contacted, _, err := c.waitForBroadcast(ctx, waiter)
+	contacted, _, err := c.waitForBroadcast(ctx, waiter, fn)
 	if err != nil {
 		return err
 	}
@@ -500,7 +508,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 	}
 }
 
-func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWaiter) ([]kadt.PeerID, map[string]struct {
+func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWaiter, fn coordt.BrdcstFunc) ([]kadt.PeerID, map[string]struct {
 	Node kadt.PeerID
 	Err  error
 }, error,
@@ -509,6 +517,13 @@ func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWai
 		select {
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
+
+		case wev, more := <-waiter.Progressed():
+			if !more {
+				continue
+			}
+			fn(wev.Ctx, wev.Event.NodeID, wev.Event.Response)
+
 		case wev, more := <-waiter.Finished():
 			if !more {
 				return nil, nil, ctx.Err()
@@ -546,6 +561,18 @@ func (c *Coordinator) Bootstrap(ctx context.Context, seeds []kadt.PeerID) error 
 
 	c.routingBehaviour.Notify(ctx, &EventStartBootstrap{
 		SeedNodes: seeds,
+	})
+
+	return nil
+}
+
+// Crawl instructs the dht to begin a full network crawl
+func (c *Coordinator) Crawl(ctx context.Context, seeds []kadt.PeerID) error {
+	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.Crawl")
+	defer span.End()
+
+	c.routingBehaviour.Notify(ctx, &EventStartCrawl{
+		Seed: seeds,
 	})
 
 	return nil

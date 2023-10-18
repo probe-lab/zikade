@@ -150,7 +150,7 @@ func (w *Waiter[E]) Chan() <-chan WaiterEvent[E] {
 }
 
 // A QueryMonitor receives event notifications on the progress of a query
-type QueryMonitor[E TerminalQueryEvent] interface {
+type QueryMonitor[E TerminalBehaviourEvent] interface {
 	// NotifyProgressed returns a channel that can be used to send notification that a
 	// query has made progress. If the notification cannot be sent then it will be
 	// queued and retried at a later time. If the query completes before the progress
@@ -168,7 +168,7 @@ type QueryMonitor[E TerminalQueryEvent] interface {
 
 // QueryMonitorHook wraps a [QueryMonitor] interface and provides hooks
 // that are invoked before calls to the QueryMonitor methods are forwarded.
-type QueryMonitorHook[E TerminalQueryEvent] struct {
+type QueryMonitorHook[E TerminalBehaviourEvent] struct {
 	qm               QueryMonitor[E]
 	BeforeProgressed func()
 	BeforeFinished   func()
@@ -176,7 +176,7 @@ type QueryMonitorHook[E TerminalQueryEvent] struct {
 
 var _ QueryMonitor[*EventQueryFinished] = (*QueryMonitorHook[*EventQueryFinished])(nil)
 
-func NewQueryMonitorHook[E TerminalQueryEvent](qm QueryMonitor[E]) *QueryMonitorHook[E] {
+func NewQueryMonitorHook[E TerminalBehaviourEvent](qm QueryMonitor[E]) *QueryMonitorHook[E] {
 	return &QueryMonitorHook[E]{
 		qm:               qm,
 		BeforeProgressed: func() {},

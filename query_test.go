@@ -25,7 +25,7 @@ func TestRTAdditionOnSuccessfulQuery(t *testing.T) {
 	// d1 does not know about d3
 	require.False(t, d1.kad.IsRoutable(ctx, kadt.PeerID(d3.host.ID())))
 
-	// // but when d3 queries d2, d1 and d3 discover each other
+	// but when d3 queries d2, d1 and d3 discover each other
 	_, _ = d3.FindPeer(ctx, "something")
 	// ignore the error
 

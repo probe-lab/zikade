@@ -37,6 +37,11 @@ func idleExplore() *RecordingSM[routing.ExploreEvent, routing.ExploreState] {
 	return NewRecordingSM[routing.ExploreEvent, routing.ExploreState](&routing.StateExploreIdle{})
 }
 
+// idleCrawl returns an crawl state machine that is always idle
+func idleCrawl() *RecordingSM[routing.CrawlEvent, routing.CrawlState] {
+	return NewRecordingSM[routing.CrawlEvent, routing.CrawlState](&routing.StateCrawlIdle{})
+}
+
 func TestRoutingConfigValidate(t *testing.T) {
 	t.Run("default is valid", func(t *testing.T) {
 		cfg := DefaultRoutingConfig()
@@ -225,7 +230,7 @@ func TestRoutingStartBootstrapSendsEvent(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	ev := &EventStartBootstrap{
@@ -256,7 +261,7 @@ func TestRoutingBootstrapGetClosestNodesSuccess(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	ev := &EventGetCloserNodesSuccess{
@@ -291,7 +296,7 @@ func TestRoutingBootstrapGetClosestNodesFailure(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, bootstrap, idleInclude(), idleProbe(), idleExplore(), idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	failure := errors.New("failed")
@@ -327,7 +332,7 @@ func TestRoutingAddNodeInfoSendsEvent(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	ev := &EventAddNode{
@@ -358,7 +363,7 @@ func TestRoutingIncludeGetClosestNodesSuccess(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	ev := &EventGetCloserNodesSuccess{
@@ -392,7 +397,7 @@ func TestRoutingIncludeGetClosestNodesFailure(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, idleProbe(), idleExplore(), idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	failure := errors.New("failed")
@@ -437,7 +442,7 @@ func TestRoutingIncludedNodeAddToProbeList(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, probe, idleExplore(), cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), include, probe, idleExplore(), idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	// a new node to be included
@@ -519,7 +524,7 @@ func TestRoutingExploreSendsEvent(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	routingBehaviour.Notify(ctx, &EventRoutingPoll{})
@@ -552,7 +557,7 @@ func TestRoutingExploreGetClosestNodesSuccess(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	ev := &EventGetCloserNodesSuccess{
@@ -586,7 +591,7 @@ func TestRoutingExploreGetClosestNodesFailure(t *testing.T) {
 
 	cfg := DefaultRoutingConfig()
 	cfg.Clock = clk
-	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, cfg)
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), explore, idleCrawl(), cfg)
 	require.NoError(t, err)
 
 	failure := errors.New("failed")
@@ -606,4 +611,35 @@ func TestRoutingExploreGetClosestNodesFailure(t *testing.T) {
 	rev := explore.first().(*routing.EventExploreFindCloserFailure[kadt.Key, kadt.PeerID])
 	require.Equal(t, peer.ID(nodes[1].NodeID), peer.ID(rev.NodeID))
 	require.Equal(t, failure, rev.Error)
+}
+
+func TestRoutingStartCrawlSendsEvent(t *testing.T) {
+	ctx := kadtest.CtxShort(t)
+
+	clk := clock.NewMock()
+	_, nodes, err := nettest.LinearTopology(4, clk)
+	require.NoError(t, err)
+
+	self := nodes[0].NodeID
+
+	// records the event passed to bootstrap
+	crawl := NewRecordingSM[routing.CrawlEvent, routing.CrawlState](&routing.StateCrawlIdle{})
+
+	cfg := DefaultRoutingConfig()
+	cfg.Clock = clk
+	routingBehaviour, err := ComposeRoutingBehaviour(self, idleBootstrap(), idleInclude(), idleProbe(), idleExplore(), crawl, cfg)
+	require.NoError(t, err)
+
+	ev := &EventStartCrawl{
+		Seed: []kadt.PeerID{nodes[1].NodeID},
+	}
+
+	routingBehaviour.Notify(ctx, ev)
+	routingBehaviour.Perform(ctx)
+
+	// the event that should be passed to the bootstrap state machine
+	expected := &routing.EventCrawlStart[kadt.Key, kadt.PeerID]{
+		Seed: ev.Seed,
+	}
+	require.Equal(t, expected, crawl.first())
 }

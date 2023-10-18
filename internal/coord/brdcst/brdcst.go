@@ -30,6 +30,7 @@ type StateBroadcastFindCloser[K kad.Key[K], N kad.NodeID[K]] struct {
 type StateBroadcastStoreRecord[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID // the id of the broadcast operation that wants to send the message
 	NodeID  N              // the node to send the message to
+	Target  K              // the key that we want to store the record for
 	Message M              // the message the broadcast behaviour wants to send
 }
 
@@ -84,13 +85,6 @@ type BroadcastEvent interface {
 // it can perform housekeeping work such as time out queries.
 type EventBroadcastPoll struct{}
 
-// EventBroadcastStart is an event that instructs a broadcast state machine to
-// start the operation.
-type EventBroadcastStart[K kad.Key[K], N kad.NodeID[K]] struct {
-	Target K   // the key we want to store the record for
-	Seed   []N // the closest nodes we know so far and from where we start the operation
-}
-
 // EventBroadcastStop notifies a [Broadcast] state machine to stop the
 // operation. This comprises all in-flight queries.
 type EventBroadcastStop struct{}
@@ -119,6 +113,7 @@ type EventBroadcastNodeFailure[K kad.Key[K], N kad.NodeID[K]] struct {
 // receive a response.
 type EventBroadcastStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	NodeID   N // the node the message was sent to
+	Target   K // the key that we successfully stored the record for
 	Request  M // the message that was sent to the remote node
 	Response M // the reply we got from the remote node (nil in many cases of the Amino DHT)
 }
@@ -128,6 +123,7 @@ type EventBroadcastStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Me
 // message that was sent is held in Request, and the error will be in Error.
 type EventBroadcastStoreRecordFailure[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	NodeID  N     // the node the message was sent to
+	Target  K     // the key that we failed to store the record for
 	Request M     // the message that was sent to the remote node
 	Error   error // the error that caused the failure, if any
 }
@@ -136,7 +132,6 @@ type EventBroadcastStoreRecordFailure[K kad.Key[K], N kad.NodeID[K], M coordt.Me
 // machine can be assigned to the [BroadcastEvent] interface.
 func (*EventBroadcastStop) broadcastEvent()                        {}
 func (*EventBroadcastPoll) broadcastEvent()                        {}
-func (*EventBroadcastStart[K, N]) broadcastEvent()                 {}
 func (*EventBroadcastNodeResponse[K, N]) broadcastEvent()          {}
 func (*EventBroadcastNodeFailure[K, N]) broadcastEvent()           {}
 func (*EventBroadcastStoreRecordSuccess[K, N, M]) broadcastEvent() {}
