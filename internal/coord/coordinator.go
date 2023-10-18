@@ -309,8 +309,9 @@ func (c *Coordinator) QueryClosest(ctx context.Context, target kadt.Key, fn coor
 
 	if cfg == nil {
 		cfg = DefaultQueryConfig()
+	} else if err := cfg.Validate(); err != nil {
+		return nil, coordt.QueryStats{}, fmt.Errorf("validate query config: %w", err)
 	}
-	// TODO: validate config
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -392,15 +393,15 @@ func (c *Coordinator) QueryMessage(ctx context.Context, msg *pb.Message, fn coor
 
 func (c *Coordinator) BroadcastRecord(ctx context.Context, msg *pb.Message, seed []kadt.PeerID) error {
 	msgFunc := func(k kadt.Key) *pb.Message { return msg }
-	return c.broadcast(ctx, msgFunc, seed, brdcst.DefaultConfigFollowUp(msg.Target()))
+	return c.broadcast(ctx, msgFunc, seed, coordt.BrdcstFuncNoop, brdcst.DefaultConfigFollowUp(msg.Target()))
 }
 
 func (c *Coordinator) BroadcastStatic(ctx context.Context, msg *pb.Message, seed []kadt.PeerID) error {
 	msgFunc := func(k kadt.Key) *pb.Message { return msg }
-	return c.broadcast(ctx, msgFunc, seed, brdcst.DefaultConfigOneToMany(msg.Target()))
+	return c.broadcast(ctx, msgFunc, seed, coordt.BrdcstFuncNoop, brdcst.DefaultConfigOneToMany(msg.Target()))
 }
 
-func (c *Coordinator) BroadcastMany(ctx context.Context, keys []kadt.Key, msgFn func(k kadt.Key) *pb.Message) error {
+func (c *Coordinator) BroadcastMany(ctx context.Context, keys []kadt.Key, fn coordt.BrdcstFunc, msgFn func(k kadt.Key) *pb.Message) error {
 	// verify that we have keys to push into the network
 	if len(keys) == 0 {
 		return fmt.Errorf("no keys to broadcast")
@@ -410,10 +411,10 @@ func (c *Coordinator) BroadcastMany(ctx context.Context, keys []kadt.Key, msgFn 
 	seed := c.rt.NearestNodes(keys[0], math.MaxInt)
 
 	// start broadcasting
-	return c.broadcast(ctx, msgFn, seed, brdcst.DefaultConfigManyToMany(keys))
+	return c.broadcast(ctx, msgFn, seed, fn, brdcst.DefaultConfigManyToMany(keys))
 }
 
-func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *pb.Message, seed []kadt.PeerID, cfg brdcst.Config) error {
+func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *pb.Message, seed []kadt.PeerID, fn coordt.BrdcstFunc, cfg brdcst.Config) error {
 	ctx, span := c.tele.Tracer.Start(ctx, "Coordinator.broadcast")
 	defer span.End()
 
@@ -434,7 +435,7 @@ func (c *Coordinator) broadcast(ctx context.Context, msgFunc func(k kadt.Key) *p
 	// queue the start of the query
 	c.brdcstBehaviour.Notify(ctx, cmd)
 
-	contacted, _, err := c.waitForBroadcast(ctx, waiter)
+	contacted, _, err := c.waitForBroadcast(ctx, waiter, fn)
 	if err != nil {
 		return err
 	}
@@ -507,7 +508,7 @@ func (c *Coordinator) waitForQuery(ctx context.Context, queryID coordt.QueryID, 
 	}
 }
 
-func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWaiter) ([]kadt.PeerID, map[string]struct {
+func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWaiter, fn coordt.BrdcstFunc) ([]kadt.PeerID, map[string]struct {
 	Node kadt.PeerID
 	Err  error
 }, error,
@@ -516,6 +517,13 @@ func (c *Coordinator) waitForBroadcast(ctx context.Context, waiter *BroadcastWai
 		select {
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
+
+		case wev, more := <-waiter.Progressed():
+			if !more {
+				return nil, nil, ctx.Err()
+			}
+			fn(wev.Ctx, wev.Event.NodeID, wev.Event.Response)
+
 		case wev, more := <-waiter.Finished():
 			if !more {
 				return nil, nil, ctx.Err()

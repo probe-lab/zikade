@@ -45,10 +45,10 @@ type RoutingNotification interface {
 	routingNotification()
 }
 
-// TerminalQueryEvent is a type of [BehaviourEvent] that indicates a query has completed.
-type TerminalQueryEvent interface {
+// TerminalBehaviourEvent is a type of [BehaviourEvent] that indicates a query has completed.
+type TerminalBehaviourEvent interface {
 	BehaviourEvent
-	terminalQueryEvent()
+	terminalBehaviourEvent()
 }
 
 type EventStartBootstrap struct {
@@ -192,8 +192,8 @@ type EventQueryFinished struct {
 	ClosestNodes []kadt.PeerID
 }
 
-func (*EventQueryFinished) behaviourEvent()     {}
-func (*EventQueryFinished) terminalQueryEvent() {}
+func (*EventQueryFinished) behaviourEvent()         {}
+func (*EventQueryFinished) terminalBehaviourEvent() {}
 
 // EventRoutingUpdated is emitted by the coordinator when a new node has been verified and added to the routing table.
 type EventRoutingUpdated struct {
@@ -258,7 +258,7 @@ type BrdcstCommand interface {
 	brdcstCommand()
 }
 
-// EventStartBroadcast starts a new
+// EventStartBroadcast starts a new broadcast operation
 type EventStartBroadcast struct {
 	QueryID coordt.QueryID
 	MsgFunc func(k kadt.Key) *pb.Message
@@ -268,6 +268,24 @@ type EventStartBroadcast struct {
 }
 
 func (*EventStartBroadcast) behaviourEvent() {}
+
+type EventStopBroadcast struct {
+	QueryID coordt.QueryID
+}
+
+func (*EventStopBroadcast) behaviourEvent() {}
+func (*EventStopBroadcast) queryCommand()   {}
+
+// EventBroadcastProgressed is emitted by the coordinator when a broadcast
+// operation has progressed.
+type EventBroadcastProgressed struct {
+	QueryID  coordt.QueryID
+	NodeID   kadt.PeerID
+	Response *pb.Message
+	Stats    query.QueryStats
+}
+
+func (*EventBroadcastProgressed) behaviourEvent() {}
 
 // EventBroadcastFinished is emitted by the coordinator when a broadcasting
 // a record to the network has finished, either through running to completion or
@@ -281,5 +299,5 @@ type EventBroadcastFinished struct {
 	}
 }
 
-func (*EventBroadcastFinished) behaviourEvent()     {}
-func (*EventBroadcastFinished) terminalQueryEvent() {}
+func (*EventBroadcastFinished) behaviourEvent()         {}
+func (*EventBroadcastFinished) terminalBehaviourEvent() {}

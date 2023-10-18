@@ -558,7 +558,6 @@ func (r *RoutingBehaviour) perfomNextInbound() (BehaviourEvent, bool) {
 				NodeID: ev.NodeID,
 			}
 		} else {
-			// TODO: apply ttl
 			cmd = &routing.EventIncludeAddCandidate[kadt.Key, kadt.PeerID]{
 				NodeID: ev.NodeID,
 			}

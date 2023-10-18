@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ipfs/boxo/provider"
 	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	record "github.com/libp2p/go-libp2p-record"
@@ -31,20 +32,23 @@ import (
 type FullRT struct {
 	*DHT
 
-	cfg *FullRTConfig
+	cfg         *FullRTConfig
+	queryConfig *coord.QueryConfig
 }
 
 type FullRTConfig struct {
 	*Config
-	CrawlInterval time.Duration
-	QuorumFrac    float64
+	CrawlInterval          time.Duration
+	QuorumFrac             float64
+	FindPeerConnectTimeout time.Duration
 }
 
 func DefaultFullRTConfig() *FullRTConfig {
 	return &FullRTConfig{
-		Config:        DefaultConfig(),
-		CrawlInterval: time.Hour, // MAGIC
-		QuorumFrac:    0.25,      // MAGIC
+		Config:                 DefaultConfig(),
+		CrawlInterval:          time.Hour, // MAGIC
+		QuorumFrac:             0.25,      // MAGIC
+		FindPeerConnectTimeout: 5 * time.Second,
 	}
 }
 
@@ -58,15 +62,20 @@ func NewFullRT(h host.Host, cfg *FullRTConfig) (*FullRT, error) {
 		cfg.Query.DefaultQuorum = int(float64(cfg.BucketSize) * cfg.QuorumFrac)
 	}
 
+	qcfg := coord.DefaultQueryConfig()
+	qcfg.NumResults = cfg.BucketSize
+	qcfg.Strategy = &query.StrategyStatic{}
+
 	frt := &FullRT{
-		DHT: d,
-		cfg: cfg,
+		DHT:         d,
+		cfg:         cfg,
+		queryConfig: qcfg,
 	}
 
 	return frt, nil
 }
 
-var _ routing.Routing = (*FullRT)(nil)
+var _ provider.ProvideMany = (*FullRT)(nil)
 
 func (f *FullRT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, error) {
 	ctx, span := f.tele.Tracer.Start(ctx, "FullRT.FindPeer")
@@ -102,7 +111,7 @@ func (f *FullRT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, erro
 	}
 
 	// start the query with a static set of peers (see queryConfig)
-	_, _, err = f.kad.QueryClosest(ctx, kadt.PeerID(pid).Key(), fn, f.queryConfig())
+	_, _, err = f.kad.QueryClosest(ctx, kadt.PeerID(pid).Key(), fn, f.queryConfig)
 	if err != nil {
 		return peer.AddrInfo{}, fmt.Errorf("failed to run query: %w", err)
 	}
@@ -119,7 +128,7 @@ func (f *FullRT) FindPeer(ctx context.Context, pid peer.ID) (peer.AddrInfo, erro
 	}
 
 	// connect to peer (this also happens in the non-fullrt case)
-	connCtx, cancel := context.WithTimeout(ctx, 5*time.Second) // TODO: put timeout in config
+	connCtx, cancel := context.WithTimeout(ctx, f.cfg.FindPeerConnectTimeout)
 	defer cancel()
 	_ = f.host.Connect(connCtx, peer.AddrInfo{
 		ID:    pid,
@@ -274,7 +283,7 @@ func (f *FullRT) findProvidersAsyncRoutine(ctx context.Context, c cid.Cid, count
 		return nil
 	}
 
-	_, _, err = f.kad.QueryMessage(ctx, msg, fn, f.queryConfig())
+	_, _, err = f.kad.QueryMessage(ctx, msg, fn, f.queryConfig)
 	if err != nil {
 		span.RecordError(err)
 		f.log.Warn("Failed querying", slog.String("cid", c.String()), slog.String("err", err.Error()))
@@ -338,13 +347,6 @@ func (f *FullRT) Bootstrap(ctx context.Context) error {
 	}
 
 	return f.kad.Crawl(ctx, seed)
-}
-
-func (f *FullRT) queryConfig() *coord.QueryConfig {
-	cfg := coord.DefaultQueryConfig()
-	cfg.NumResults = f.cfg.BucketSize
-	cfg.Strategy = &query.StrategyStatic{}
-	return cfg
 }
 
 func (f *FullRT) GetValue(ctx context.Context, key string, opts ...routing.Option) ([]byte, error) {
@@ -510,7 +512,7 @@ func (f *FullRT) searchValueRoutine(ctx context.Context, backend Backend, ns str
 		return nil
 	}
 
-	_, _, err := f.kad.QueryMessage(ctx, req, fn, f.queryConfig())
+	_, _, err := f.kad.QueryMessage(ctx, req, fn, f.queryConfig)
 	if err != nil {
 		f.warnErr(err, "Search value query failed")
 		return
@@ -568,7 +570,12 @@ func (f *FullRT) ProvideMany(ctx context.Context, mhashes []mh.Multihash) error 
 		keys = append(keys, kadt.NewKey(mhash))
 	}
 
-	return f.kad.BroadcastMany(ctx, keys, msgFn)
+	// track successes
+	fn := func(ctx context.Context, id kadt.PeerID, resp *pb.Message) {
+		// TODO
+	}
+
+	return f.kad.BroadcastMany(ctx, keys, fn, msgFn)
 }
 
 func (f *FullRT) PutMany(ctx context.Context, keySlice []string, valueSlice [][]byte) error {
@@ -618,5 +625,5 @@ func (f *FullRT) PutMany(ctx context.Context, keySlice []string, valueSlice [][]
 		}
 	}
 
-	return f.kad.BroadcastMany(ctx, kadKeys, msgFn)
+	return f.kad.BroadcastMany(ctx, kadKeys, nil, msgFn)
 }

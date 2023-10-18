@@ -258,8 +258,8 @@ type StatePoolWaiting struct{}
 type StatePoolStoreRecord[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID // the id of the broadcast operation that wants to send the message
 	NodeID  N              // the node to send the message to
-	Target  K
-	Message M // the message that should be sent to the remote node
+	Target  K              // the key we want to store a record for
+	Message M              // the message that should be sent to the remote node
 }
 
 // StatePoolBroadcastFinished indicates that the broadcast operation with the
@@ -347,9 +347,9 @@ type EventPoolGetCloserNodesFailure[K kad.Key[K], N kad.NodeID[K]] struct {
 type EventPoolStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID  coordt.QueryID // the id of the query that sent the message
 	NodeID   N              // the node the message was sent to
-	Target   K
-	Request  M // the message that was sent to the remote node
-	Response M // the reply we got from the remote node (nil in many cases of the Amino DHT)
+	Target   K              // the key we successfully stored a record for
+	Request  M              // the message that was sent to the remote node
+	Response M              // the reply we got from the remote node (nil in many cases of the Amino DHT)
 }
 
 // EventPoolStoreRecordFailure noties the broadcast [Pool] that storing a record
@@ -358,9 +358,9 @@ type EventPoolStoreRecordSuccess[K kad.Key[K], N kad.NodeID[K], M coordt.Message
 type EventPoolStoreRecordFailure[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	QueryID coordt.QueryID // the id of the query that sent the message
 	NodeID  N              // the node the message was sent to
-	Target  K
-	Request M     // the message that was sent to the remote node
-	Error   error // the error that caused the failure
+	Target  K              // the key we failed to store a record for
+	Request M              // the message that was sent to the remote node
+	Error   error          // the error that caused the failure
 }
 
 // poolEvent() ensures that only events accepted by a broadcast [Pool] can be

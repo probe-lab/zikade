@@ -40,7 +40,7 @@ var (
 // Query stops entirely and returns that error.
 //
 // The stats argument contains statistics on the progress of the query so far.
-type QueryFunc func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats QueryStats) error
+type QueryFunc func(ctx context.Context, id kadt.PeerID, resp *pb.Message, stats QueryStats) error // TODO: move to query package?
 
 type QueryStats struct {
 	Start     time.Time // Start is the time the query began executing.
@@ -50,6 +50,11 @@ type QueryStats struct {
 	Failure   int       // Failure is a count of the number of nodes the query received an error response from.
 	Exhausted bool      // Exhausted is true if the query ended after visiting every node it could.
 }
+
+// BrdcstFunc is the type of the function called when broadcasting to the network after we have received a response from a node.
+type BrdcstFunc func(ctx context.Context, id kadt.PeerID, resp *pb.Message)
+
+func BrdcstFuncNoop(ctx context.Context, id kadt.PeerID, resp *pb.Message) {}
 
 var (
 	// ErrSkipNode is used as a return value from a QueryFunc to indicate that the node is to be skipped.

@@ -445,7 +445,7 @@ func (p *QueryBehaviour) queueNonConnectivityEvent(nid kadt.PeerID) {
 	})
 }
 
-type queryNotifier[E TerminalQueryEvent] struct {
+type queryNotifier[E TerminalBehaviourEvent] struct {
 	monitor  QueryMonitor[E]
 	pending  []CtxEvent[*EventQueryProgressed]
 	stopping bool

@@ -49,14 +49,17 @@ type FollowUp[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {
 	// the logic much easier to implement.
 	pool *query.Pool[K, N, M]
 
-	// TODO: ...
+	// started indicates that this state machine has sent out the first
+	// message to a node. Even after this state machine has returned a finished
+	// state, this flag will stay true.
 	started bool
 
 	// the message generator that takes a target key and will return the message
 	// that we will send to the closest nodes in the follow-up phase
 	msgFunc func(K) M
 
-	// TODO:
+	// seed holds the nodes from where we should start our query to find closer
+	// nodes to the target key (held by [ConfigFollowUp]).
 	seed []N
 
 	// the closest nodes to the target key. This will be filled after the query
