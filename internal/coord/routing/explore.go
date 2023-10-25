@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 
 	"github.com/plprobelab/zikade/errs"
 	"github.com/plprobelab/zikade/internal/coord/coordt"
@@ -97,6 +98,9 @@ type ExploreConfig struct {
 	// Meter is the meter that should be used to record metrics.
 	Meter metric.Meter
 
+	// Logger is a structured logger that will be used when logging.
+	Logger *slog.Logger
+
 	// Timeout is maximum time to allow for performing an explore for a CPL.
 	Timeout time.Duration
 
@@ -148,6 +152,13 @@ func (cfg *ExploreConfig) Validate() error {
 		}
 	}
 
+	if cfg.Logger == nil {
+		return &errs.ConfigurationError{
+			Component: "ExploreConfig",
+			Err:       fmt.Errorf("logger must not be nil"),
+		}
+	}
+
 	return nil
 }
 
@@ -158,6 +169,7 @@ func DefaultExploreConfig() *ExploreConfig {
 		Clock:  clock.New(), // use standard time
 		Tracer: tele.NoopTracer(),
 		Meter:  tele.NoopMeter(),
+		Logger: tele.DefaultLogger("routing"),
 
 		Timeout:            10 * time.Minute, // MAGIC
 		RequestConcurrency: 3,                // MAGIC

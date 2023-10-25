@@ -60,6 +60,12 @@ func TestExploreConfigValidate(t *testing.T) {
 		cfg.RequestTimeout = -1
 		require.Error(t, cfg.Validate())
 	})
+
+	t.Run("logger not nil", func(t *testing.T) {
+		cfg := DefaultExploreConfig()
+		cfg.Logger = nil
+		require.Error(t, cfg.Validate())
+	})
 }
 
 // maxCpl is 7 since we are using tiny 8-bit keys

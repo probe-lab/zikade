@@ -63,6 +63,12 @@ func TestProbeConfigValidate(t *testing.T) {
 		cfg.CheckInterval = -1
 		require.Error(t, cfg.Validate())
 	})
+
+	t.Run("logger not nil", func(t *testing.T) {
+		cfg := DefaultProbeConfig()
+		cfg.Logger = nil
+		require.Error(t, cfg.Validate())
+	})
 }
 
 func TestProbeStartsIdle(t *testing.T) {

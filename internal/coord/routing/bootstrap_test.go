@@ -59,6 +59,12 @@ func TestBootstrapConfigValidate(t *testing.T) {
 		cfg.RequestTimeout = -1
 		require.Error(t, cfg.Validate())
 	})
+
+	t.Run("logger not nil", func(t *testing.T) {
+		cfg := DefaultBootstrapConfig()
+		cfg.Logger = nil
+		require.Error(t, cfg.Validate())
+	})
 }
 
 func TestBootstrapStartsIdle(t *testing.T) {

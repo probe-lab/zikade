@@ -11,6 +11,7 @@ import (
 	"github.com/plprobelab/go-libdht/kad/key"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 
 	"github.com/plprobelab/zikade/errs"
 	"github.com/plprobelab/zikade/tele"
@@ -67,6 +68,9 @@ type IncludeConfig struct {
 
 	// Meter is the meter that should be used to record metrics.
 	Meter metric.Meter
+
+	// Logger is a structured logger that will be used when logging.
+	Logger *slog.Logger
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -113,6 +117,13 @@ func (cfg *IncludeConfig) Validate() error {
 		}
 	}
 
+	if cfg.Logger == nil {
+		return &errs.ConfigurationError{
+			Component: "IncludeConfig",
+			Err:       fmt.Errorf("logger must not be nil"),
+		}
+	}
+
 	return nil
 }
 
@@ -123,6 +134,7 @@ func DefaultIncludeConfig() *IncludeConfig {
 		Clock:  clock.New(), // use standard time
 		Tracer: tele.NoopTracer(),
 		Meter:  tele.NoopMeter(),
+		Logger: tele.DefaultLogger("routing"),
 
 		Concurrency:   3,
 		Timeout:       time.Minute,

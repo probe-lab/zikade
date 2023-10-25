@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 
 	"github.com/plprobelab/zikade/errs"
 	"github.com/plprobelab/zikade/tele"
@@ -96,6 +97,9 @@ type ProbeConfig struct {
 
 	// Meter is the meter that should be used to record metrics.
 	Meter metric.Meter
+
+	// Logger is a structured logger that will be used when logging.
+	Logger *slog.Logger
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -118,6 +122,13 @@ func (cfg *ProbeConfig) Validate() error {
 		return &errs.ConfigurationError{
 			Component: "ProbeConfig",
 			Err:       fmt.Errorf("meter must not be nil"),
+		}
+	}
+
+	if cfg.Logger == nil {
+		return &errs.ConfigurationError{
+			Component: "ProbeConfig",
+			Err:       fmt.Errorf("logger must not be nil"),
 		}
 	}
 
@@ -152,6 +163,7 @@ func DefaultProbeConfig() *ProbeConfig {
 		Clock:  clock.New(), // use standard time
 		Tracer: tele.NoopTracer(),
 		Meter:  tele.NoopMeter(),
+		Logger: tele.DefaultLogger("routing"),
 
 		Concurrency:   3,             // MAGIC
 		Timeout:       time.Minute,   // MAGIC
@@ -487,7 +499,7 @@ func (l *nodeValueList[K, N]) nodeCount() int {
 }
 
 // Put removes a node value from the list, deleting its information.
-// It is removed from the pending list andongoing list if it was already present in either.
+// It is removed from the pending list and ongoing list if it was already present in either.
 func (l *nodeValueList[K, N]) Remove(n N) {
 	mk := key.HexString(n.Key())
 	nve, ok := l.nodes[mk]

@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/slog"
 
 	"github.com/plprobelab/zikade/errs"
 	"github.com/plprobelab/zikade/internal/coord/coordt"
@@ -59,6 +60,9 @@ type BootstrapConfig struct {
 
 	// Meter is the meter that should be used to record metrics.
 	Meter metric.Meter
+
+	// Logger is a structured logger that will be used when logging.
+	Logger *slog.Logger
 }
 
 // Validate checks the configuration options and returns an error if any have invalid values.
@@ -105,6 +109,13 @@ func (cfg *BootstrapConfig) Validate() error {
 		}
 	}
 
+	if cfg.Logger == nil {
+		return &errs.ConfigurationError{
+			Component: "BootstrapConfig",
+			Err:       fmt.Errorf("logger must not be nil"),
+		}
+	}
+
 	return nil
 }
 
@@ -115,6 +126,7 @@ func DefaultBootstrapConfig() *BootstrapConfig {
 		Clock:  clock.New(), // use standard time
 		Tracer: tele.NoopTracer(),
 		Meter:  tele.NoopMeter(),
+		Logger: tele.DefaultLogger("routing"),
 
 		Timeout:            5 * time.Minute, // MAGIC
 		RequestConcurrency: 3,               // MAGIC
