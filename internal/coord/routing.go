@@ -265,8 +265,8 @@ func DefaultRoutingConfig() *RoutingConfig {
 
 		ConnectivityCheckTimeout: time.Minute, // MAGIC
 
-		ProbeRequestConcurrency: 3,             // MAGIC
-		ProbeCheckInterval:      6 * time.Hour, // MAGIC
+		ProbeRequestConcurrency: 3,                // MAGIC
+		ProbeCheckInterval:      15 * time.Minute, // MAGIC
 
 		IncludeRequestConcurrency: 3,   // MAGIC
 		IncludeQueueCapacity:      128, // MAGIC
@@ -333,6 +333,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	bootstrapCfg.Clock = cfg.Clock
 	bootstrapCfg.Tracer = cfg.Tracer
 	bootstrapCfg.Meter = cfg.Meter
+	bootstrapCfg.Logger = cfg.Logger.With("statemachine", "bootstrap")
 	bootstrapCfg.Timeout = cfg.BootstrapTimeout
 	bootstrapCfg.RequestConcurrency = cfg.BootstrapRequestConcurrency
 	bootstrapCfg.RequestTimeout = cfg.BootstrapRequestTimeout
@@ -346,6 +347,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	includeCfg.Clock = cfg.Clock
 	includeCfg.Tracer = cfg.Tracer
 	includeCfg.Meter = cfg.Meter
+	includeCfg.Logger = cfg.Logger.With("statemachine", "include")
 	includeCfg.Timeout = cfg.ConnectivityCheckTimeout
 	includeCfg.QueueCapacity = cfg.IncludeQueueCapacity
 	includeCfg.Concurrency = cfg.IncludeRequestConcurrency
@@ -359,6 +361,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	probeCfg.Clock = cfg.Clock
 	probeCfg.Tracer = cfg.Tracer
 	probeCfg.Meter = cfg.Meter
+	probeCfg.Logger = cfg.Logger.With("statemachine", "probe")
 	probeCfg.Timeout = cfg.ConnectivityCheckTimeout
 	probeCfg.Concurrency = cfg.ProbeRequestConcurrency
 	probeCfg.CheckInterval = cfg.ProbeCheckInterval
@@ -372,6 +375,7 @@ func NewRoutingBehaviour(self kadt.PeerID, rt routing.RoutingTableCpl[kadt.Key, 
 	exploreCfg.Clock = cfg.Clock
 	exploreCfg.Tracer = cfg.Tracer
 	exploreCfg.Meter = cfg.Meter
+	exploreCfg.Logger = cfg.Logger.With("statemachine", "explore")
 	exploreCfg.Timeout = cfg.ExploreTimeout
 	exploreCfg.RequestConcurrency = cfg.ExploreRequestConcurrency
 	exploreCfg.RequestTimeout = cfg.ExploreRequestTimeout

@@ -129,6 +129,11 @@ func New(h host.Host, cfg *Config) (*DHT, error) {
 	coordCfg.Routing.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
 	coordCfg.Routing.Meter = cfg.MeterProvider.Meter(tele.MeterName)
 
+	coordCfg.Network.Clock = cfg.Clock
+	coordCfg.Network.Logger = cfg.Logger.With("behaviour", "network")
+	coordCfg.Network.Tracer = cfg.TracerProvider.Tracer(tele.TracerName)
+	coordCfg.Network.Meter = cfg.MeterProvider.Meter(tele.MeterName)
+
 	rtr := &router{
 		host:       h,
 		protocolID: cfg.ProtocolID,
