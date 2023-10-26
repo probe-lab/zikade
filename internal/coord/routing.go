@@ -265,8 +265,8 @@ func DefaultRoutingConfig() *RoutingConfig {
 
 		ConnectivityCheckTimeout: time.Minute, // MAGIC
 
-		ProbeRequestConcurrency: 3,             // MAGIC
-		ProbeCheckInterval:      6 * time.Hour, // MAGIC
+		ProbeRequestConcurrency: 3,                // MAGIC
+		ProbeCheckInterval:      15 * time.Minute, // MAGIC
 
 		IncludeRequestConcurrency: 3,   // MAGIC
 		IncludeQueueCapacity:      128, // MAGIC
