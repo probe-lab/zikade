@@ -2,8 +2,8 @@
 
 [![ProbeLab](https://img.shields.io/badge/made%20by-ProbeLab-blue.svg)](https://probelab.io)
 [![Libp2p](https://img.shields.io/badge/project-libp2p-yellow.svg)](https://libp2p.io)
-[![Build status](https://img.shields.io/github/actions/workflow/status/plprobelab/zikade/go-test.yml?branch=main)](https://github.com/plprobelab/zikade/actions)
-[![GoDoc](https://pkg.go.dev/badge/github.com/plprobelab/zikade)](https://pkg.go.dev/github.com/plprobelab/zikade)
+[![Build status](https://img.shields.io/github/actions/workflow/status/probe-lab/zikade/go-test.yml?branch=main)](https://github.com/probe-lab/zikade/actions)
+[![GoDoc](https://pkg.go.dev/badge/github.com/probe-lab/zikade)](https://pkg.go.dev/github.com/probe-lab/zikade)
 [![Discourse posts](https://img.shields.io/discourse/https/discuss.libp2p.io/posts.svg)](https://discuss.libp2p.io)
 
 > A Go implementation of the [libp2p Kademlia DHT specification](https://github.com/libp2p/specs/tree/master/kad-dht).
@@ -59,7 +59,7 @@ Where possible, Zikade will remain compatible with [go-libp2p-kad-dht](https://g
 ## Install
 
 ```sh
-go get github.com/plprobelab/zikade
+go get github.com/probe-lab/zikade
 ```
 
 ## Maintainers
@@ -74,7 +74,7 @@ See [CODEOWNERS](./CODEOWNERS).
 
 Contributions are welcome! 
 
-Please take a look at [the issues](https://github.com/plprobelab/zikade/issues).
+Please take a look at [the issues](https://github.com/probe-lab/zikade/issues).
 
 This repository is part of the IPFS project and therefore governed by our [contributing guidelines](https://github.com/ipfs/community/blob/master/CONTRIBUTING.md).
 

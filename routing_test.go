@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/plprobelab/zikade/internal/kadtest"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 // newRandomContent reads 1024 bytes from crypto/rand and builds a content struct.

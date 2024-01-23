@@ -15,10 +15,10 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/internal/coord"
-	"github.com/plprobelab/zikade/internal/coord/routing"
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/internal/coord"
+	"github.com/probe-lab/zikade/internal/coord/routing"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/tele"
 )
 
 // DHT is an implementation of Kademlia with S/Kademlia modifications.

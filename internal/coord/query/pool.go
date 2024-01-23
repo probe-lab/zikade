@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad"
 
-	"github.com/plprobelab/zikade/errs"
-	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/errs"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/tele"
 )
 
 type Pool[K kad.Key[K], N kad.NodeID[K], M coordt.Message] struct {

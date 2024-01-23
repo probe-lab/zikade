@@ -20,7 +20,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/tele"
 )
 
 // ProvidersBackend implements the [Backend] interface and handles provider
@@ -113,7 +113,7 @@ func DefaultProviderBackendConfig() (*ProvidersBackendConfig, error) {
 
 	return &ProvidersBackendConfig{
 		clk:             clock.New(),
-		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
+		ProvideValidity: 48 * time.Hour, // empirically measured in: https://github.com/probe-lab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 		AddressTTL:      24 * time.Hour, // MAGIC
 		CacheSize:       256,            // MAGIC
 		GCInterval:      time.Hour,      // MAGIC

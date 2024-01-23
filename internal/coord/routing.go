@@ -12,12 +12,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/errs"
-	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/internal/coord/cplutil"
-	"github.com/plprobelab/zikade/internal/coord/routing"
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/errs"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/internal/coord/cplutil"
+	"github.com/probe-lab/zikade/internal/coord/routing"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/tele"
 )
 
 const (

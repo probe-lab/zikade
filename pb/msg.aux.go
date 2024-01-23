@@ -7,7 +7,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/kadt"
 	"golang.org/x/exp/slog"
 )
 

@@ -9,12 +9,12 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/internal/coord/cplutil"
-	"github.com/plprobelab/zikade/internal/coord/routing"
-	"github.com/plprobelab/zikade/internal/kadtest"
-	"github.com/plprobelab/zikade/internal/nettest"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/internal/coord/cplutil"
+	"github.com/probe-lab/zikade/internal/coord/routing"
+	"github.com/probe-lab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/internal/nettest"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 // idleBootstrap returns a bootstrap state machine that is always idle

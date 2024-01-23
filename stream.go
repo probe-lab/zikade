@@ -19,8 +19,8 @@ import (
 	"golang.org/x/exp/slog"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/plprobelab/zikade/pb"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/pb"
+	"github.com/probe-lab/zikade/tele"
 )
 
 // streamHandler is the function that's registered with the libp2p host for

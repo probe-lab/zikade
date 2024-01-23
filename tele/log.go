@@ -2,7 +2,7 @@ package tele
 
 import (
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/kadt"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 )

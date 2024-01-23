@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/plprobelab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad/key"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/tiny"
+	"github.com/probe-lab/zikade/internal/tiny"
 )
 
 var (

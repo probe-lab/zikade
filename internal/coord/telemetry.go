@@ -4,7 +4,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/tele"
 )
 
 // Telemetry is the struct that holds a reference to all metrics and the tracer used

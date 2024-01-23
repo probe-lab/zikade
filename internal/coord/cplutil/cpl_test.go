@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/plprobelab/go-libdht/kad/key/bit256"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/go-libdht/kad/key/bit256"
+	"github.com/probe-lab/zikade/kadt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

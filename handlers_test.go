@@ -23,8 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/pb"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/pb"
 )
 
 func TestMessage_noKey(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/coord"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/internal/coord"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 // A Topology is an arrangement of DHTs intended to simulate a network

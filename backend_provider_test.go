@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/internal/kadtest"
 )
 
 var devnull = slog.New(slog.NewTextHandler(io.Discard, nil))

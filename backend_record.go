@@ -40,7 +40,7 @@ func DefaultRecordBackendConfig() (*RecordBackendConfig, error) {
 		clk:          clock.New(),
 		Logger:       slog.Default(),
 		Tele:         telemetry,
-		MaxRecordAge: 48 * time.Hour, // empirically measured in: https://github.com/plprobelab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
+		MaxRecordAge: 48 * time.Hour, // empirically measured in: https://github.com/probe-lab/network-measurements/blob/master/results/rfm17-provider-record-liveness.md
 	}, nil
 }
 

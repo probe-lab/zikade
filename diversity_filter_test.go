@@ -8,8 +8,8 @@ import (
 	"github.com/libp2p/go-libp2p-kbucket/peerdiversity"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/plprobelab/go-libdht/kad/triert"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/go-libdht/kad/triert"
+	"github.com/probe-lab/zikade/kadt"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
