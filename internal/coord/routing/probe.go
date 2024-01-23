@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-libdht/kad"
-	"github.com/plprobelab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad/key"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/plprobelab/zikade/errs"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/errs"
+	"github.com/probe-lab/zikade/tele"
 )
 
 type RoutingTableCpl[K kad.Key[K], N kad.NodeID[K]] interface {

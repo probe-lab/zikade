@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/internal/kadtest"
-	"github.com/plprobelab/zikade/internal/nettest"
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/pb"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/internal/nettest"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/pb"
 )
 
 func TestQueryConfigValidate(t *testing.T) {

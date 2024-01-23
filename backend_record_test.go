@@ -9,7 +9,7 @@ import (
 	record "github.com/libp2p/go-libp2p-record"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/plprobelab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/internal/kadtest"
 )
 
 // testValidator is a validator that considers all values valid that have a

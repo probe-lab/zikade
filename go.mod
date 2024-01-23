@@ -1,4 +1,4 @@
-module github.com/plprobelab/zikade
+module github.com/probe-lab/zikade
 
 go 1.20
 
@@ -18,7 +18,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.11.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/plprobelab/go-libdht v0.1.0
+	github.com/probe-lab/go-libdht v0.1.0
 	github.com/prometheus/client_golang v1.16.0 // indirect
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/otel v1.18.0

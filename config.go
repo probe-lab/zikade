@@ -12,15 +12,15 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/plprobelab/go-libdht/kad/triert"
+	"github.com/probe-lab/go-libdht/kad/triert"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/exp/zapslog"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/internal/coord/routing"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/internal/coord/routing"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 // ServiceName is used to scope incoming streams for the resource manager.

@@ -14,7 +14,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/tele"
 )
 
 var (

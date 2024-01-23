@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/kadtest"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 func TestRTAdditionOnSuccessfulQuery(t *testing.T) {

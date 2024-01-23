@@ -9,20 +9,20 @@ import (
 	"sync/atomic"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/errs"
-	"github.com/plprobelab/zikade/internal/coord/brdcst"
-	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/internal/coord/routing"
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/pb"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/errs"
+	"github.com/probe-lab/zikade/internal/coord/brdcst"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/internal/coord/routing"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/pb"
+	"github.com/probe-lab/zikade/tele"
 )
 
 // A Coordinator coordinates the state machines that comprise a Kademlia DHT

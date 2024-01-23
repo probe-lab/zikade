@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/plprobelab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/internal/kadtest"
 
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/stretchr/testify/assert"

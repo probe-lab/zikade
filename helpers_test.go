@@ -15,8 +15,8 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/pb"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/pb"
 )
 
 var rng = rand.New(rand.NewSource(1337))

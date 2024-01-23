@@ -7,7 +7,7 @@ import (
 
 	mh "github.com/multiformats/go-multihash"
 
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 //go:generate go run ./gen.go

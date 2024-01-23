@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/kadtest"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/internal/kadtest"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 func TestNew(t *testing.T) {

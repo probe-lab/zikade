@@ -3,9 +3,9 @@ package query
 import (
 	"context"
 
-	"github.com/plprobelab/go-libdht/kad"
-	"github.com/plprobelab/go-libdht/kad/key"
-	"github.com/plprobelab/go-libdht/kad/trie"
+	"github.com/probe-lab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad/trie"
 )
 
 // A NodeIter iterates nodes according to some strategy.

@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-libdht/kad/triert"
+	"github.com/probe-lab/go-libdht/kad/triert"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/plprobelab/zikade/internal/tiny"
+	"github.com/probe-lab/zikade/internal/tiny"
 )
 
 func TestExploreConfigValidate(t *testing.T) {

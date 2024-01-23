@@ -6,7 +6,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/plprobelab/zikade/kadt"
+	"github.com/probe-lab/zikade/kadt"
 )
 
 // networkEventsSubscription registers a subscription on the libp2p event bus

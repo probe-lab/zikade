@@ -3,7 +3,7 @@ package query
 import (
 	"time"
 
-	"github.com/plprobelab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad"
 )
 
 type NodeStatus[K kad.Key[K], N kad.NodeID[K]] struct {

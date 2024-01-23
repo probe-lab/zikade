@@ -7,15 +7,15 @@ import (
 	"time"
 
 	"github.com/benbjohnson/clock"
-	"github.com/plprobelab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/plprobelab/zikade/errs"
-	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/internal/coord/query"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/errs"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/internal/coord/query"
+	"github.com/probe-lab/zikade/tele"
 )
 
 // BootstrapQueryID is the id for the query operated by the bootstrap process

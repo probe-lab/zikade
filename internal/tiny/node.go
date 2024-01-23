@@ -4,9 +4,9 @@ package tiny
 import (
 	"fmt"
 
-	"github.com/plprobelab/go-libdht/kad"
-	"github.com/plprobelab/go-libdht/kad/kadtest"
-	"github.com/plprobelab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad/kadtest"
+	"github.com/probe-lab/go-libdht/kad/key"
 )
 
 type Key = kadtest.Key8

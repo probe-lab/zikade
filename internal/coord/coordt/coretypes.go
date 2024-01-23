@@ -5,10 +5,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/plprobelab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad"
 
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/pb"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/pb"
 )
 
 // TODO: rename to something like OperationID. This type isn't only used to identify queries but also other operations like broadcasts.

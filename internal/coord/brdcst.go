@@ -7,11 +7,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/slog"
 
-	"github.com/plprobelab/zikade/internal/coord/brdcst"
-	"github.com/plprobelab/zikade/internal/coord/coordt"
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/pb"
-	"github.com/plprobelab/zikade/tele"
+	"github.com/probe-lab/zikade/internal/coord/brdcst"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/pb"
+	"github.com/probe-lab/zikade/tele"
 )
 
 type PooledBroadcastBehaviour struct {

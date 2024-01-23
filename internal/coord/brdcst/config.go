@@ -3,7 +3,7 @@ package brdcst
 import (
 	"fmt"
 
-	"github.com/plprobelab/zikade/internal/coord/query"
+	"github.com/probe-lab/zikade/internal/coord/query"
 )
 
 // ConfigPool specifies the configuration for a broadcast [Pool].

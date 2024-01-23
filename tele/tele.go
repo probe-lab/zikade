@@ -18,8 +18,8 @@ import (
 type ctxKey struct{}
 
 const (
-	MeterName  = "github.com/plprobelab/zikade"
-	TracerName = "github.com/plprobelab/zikade"
+	MeterName  = "github.com/probe-lab/zikade"
+	TracerName = "github.com/probe-lab/zikade"
 )
 
 // NoopTracer returns a tracer that does not emit traces.

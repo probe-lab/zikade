@@ -1,9 +1,9 @@
 package brdcst
 
 import (
-	"github.com/plprobelab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad"
 
-	"github.com/plprobelab/zikade/internal/coord/coordt"
+	"github.com/probe-lab/zikade/internal/coord/coordt"
 )
 
 // BroadcastState must be implemented by all states that a [Broadcast] state

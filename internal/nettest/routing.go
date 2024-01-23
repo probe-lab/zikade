@@ -9,11 +9,11 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/plprobelab/go-libdht/kad"
-	"github.com/plprobelab/go-libdht/kad/key"
+	"github.com/probe-lab/go-libdht/kad"
+	"github.com/probe-lab/go-libdht/kad/key"
 
-	"github.com/plprobelab/zikade/kadt"
-	"github.com/plprobelab/zikade/pb"
+	"github.com/probe-lab/zikade/kadt"
+	"github.com/probe-lab/zikade/pb"
 )
 
 var rng = rand.New(rand.NewSource(6283185))
