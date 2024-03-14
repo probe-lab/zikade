@@ -29,7 +29,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.18.0
 	go.uber.org/zap/exp v0.1.0 // cannot update to v0.2.0 because zapslog requires go1.21
 	golang.org/x/exp v0.0.0-20230817173708-d852ddb80c63
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.33.0
 )
 
 require (
